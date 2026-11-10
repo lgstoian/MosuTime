@@ -82,14 +82,12 @@ static esp_log_level_t log_level_for(uint8_t level)
 /* -------------------------------------------------------------------- touch */
 
 /*
- * LVGL reports the raw edges; the double tap detector decides whether the
- * watch should speak.  The callback runs in the LVGL task even while the face
- * is off, so s_tap is shared with the app task: guard it with a spinlock.
- *
- * The touch interrupt itself belongs to esp_lvgl_port: it registers the ISR
- * on the INT pin and puts the input device in event mode.  We must not add a
- * second handler on that pin.
+ * The touch interrupt belongs to esp_lvgl_port: it registers the ISR on the
+ * INT pin and puts the input device in event mode.  We must not add a second
+ * handler on that pin.
  */
+
+/* Reset the double tap detector, safely against a touch callback. */
 static void tap_reset(void)
 {
     mosu_tap_cfg_t cfg = {
@@ -104,6 +102,12 @@ static void tap_reset(void)
     taskEXIT_CRITICAL(&s_tap_mux);
 }
 
+/*
+ * LVGL reports the raw edges; the double tap detector decides whether the
+ * watch should speak.  The callback runs in the LVGL task even while the face
+ * is off (only the LVGL timers are stopped), so s_tap is shared with the app
+ * task and guarded by s_tap_mux.
+ */
 static void on_touch(bool pressed, int16_t x, int16_t y, void *user)
 {
     (void)user;
