@@ -221,6 +221,16 @@ esp-emu ... --inject-on "console ready" --inject "say\n"
 #   W mosu_audio: missing clip: /sdcard/voice/m_41.wav
 #   W mosu_audio: missing clip: /sdcard/voice/d_1.wav
 
+# The hardware screenshot path without an SD card: /dev/null still exercises
+# the LVGL snapshot and the BMP row conversion.
+esp-emu ... --inject-on "console ready" \
+  --inject "display\nscreenshot /dev/null\n"
+#   display: 410x502, on, panel brightness 55%, configured 55%
+#   buffer: 20500 px, double 1, dma 1, spiram 0
+#   panel: SH8601/CO5300, touch: FT3168
+#   I mosu_ui: snapshot written to /dev/null (410x502)
+#   screenshot /dev/null: ESP_OK
+
 # Interactive board, by hand: 20 s of emulated time, control channel on 5556
 esp-emu --chip esp32s3 --firmware build-emu/merged-binary.bin \
   --psram-size 8M --console uart0 --timeout 20s \

@@ -311,6 +311,12 @@ static void diag_screen_on(void)
     s_diag_screen_request = 1;
 }
 
+/* Wake for one normal activity window; do not hold the panel on. */
+static void diag_wake(void)
+{
+    s_diag_screen_request = 1;
+}
+
 static void diag_screen_off(void)
 {
     s_force_screen_on = false;
@@ -338,6 +344,7 @@ static void diag_power_idle(void)
 }
 
 static const mosu_diag_hooks_t s_diag_hooks = {
+    .wake = diag_wake,
     .screen_on = diag_screen_on,
     .screen_off = diag_screen_off,
     .test_pattern = diag_test_pattern,

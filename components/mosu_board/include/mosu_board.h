@@ -67,6 +67,24 @@ typedef struct {
     float z;
 } mosu_board_accel_t;
 
+/*
+ * One struct for the console's `display` line: the geometry and buffer sizes
+ * are compile-time choices, brightness and power state come from the driver.
+ * Strings are literals owned by the component, never freed by the caller.
+ */
+typedef struct {
+    int32_t width;
+    int32_t height;
+    uint8_t brightness; /* configured percent, from the last set */
+    bool on;
+    uint32_t draw_buffer_pixels;
+    bool double_buffer;
+    bool buffer_dma;
+    bool buffer_spiram;
+    const char *panel;
+    const char *touch;
+} mosu_board_display_info_t;
+
 esp_err_t mosu_board_init(void);
 
 /* Display + touch + LVGL port.  Call once, after mosu_board_init(). */
@@ -76,6 +94,8 @@ esp_err_t mosu_board_display_on(void);
 esp_err_t mosu_board_display_off(void);
 esp_err_t mosu_board_brightness_set(uint8_t percent);
 bool mosu_board_touch_active(void);
+/* Read-only snapshot for diagnostics; never fails, never touches the panel. */
+void mosu_board_display_info(mosu_board_display_info_t *out);
 
 esp_err_t mosu_board_sdcard_mount(void);
 void mosu_board_sdcard_unmount(void);

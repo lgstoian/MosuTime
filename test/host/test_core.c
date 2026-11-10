@@ -295,7 +295,13 @@ int main(void)
     test_config();
     test_session();
     test_config_extra();
+    test_bmp();
+    test_policy();
 
     printf("\n%d checks, %d failures\n", g_checks, g_failures);
+    if (g_checks == 0) {
+        printf("no checks were executed\n");
+        return 1;
+    }
     return g_failures == 0 ? 0 : 1;
 }

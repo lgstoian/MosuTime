@@ -220,7 +220,7 @@ void mosu_config_defaults(mosu_config_t *cfg)
              "EET-2EEST,M3.5.0/3,M10.5.0/4");
     cfg->clock.auto_timezone = true;
     copy_str(cfg->clock.geo_url, sizeof(cfg->clock.geo_url),
-             "https://ipapi.co/timezone/");
+             "http://ip-api.com/line/?fields=timezone,offset");
     copy_str(cfg->clock.ntp1, sizeof(cfg->clock.ntp1), "pool.ntp.org");
     copy_str(cfg->clock.ntp2, sizeof(cfg->clock.ntp2), "time.google.com");
     cfg->clock.sync_hours = 6;

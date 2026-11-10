@@ -12,7 +12,7 @@ boot log and the long-standing commands instead, and note it.
 | Command | Availability | Use |
 | --- | --- | --- |
 | `help`, `status`, `time`, `sync`, `say`, `settime`, `bright`, `vol`, `tap`, `reboot` | long-standing | day-to-day maintenance |
-| `i2c`, `pmu`, `rtc`, `imu`, `pm`, `heap`, `tasks`, `test screen`, `test touch`, `test audio`, `sd remount`, `config`, `power` | bring-up extension | this checklist |
+| `i2c`, `pmu`, `rtc`, `imu`, `pm`, `heap`, `tasks`, `display`, `test screen`, `test touch`, `test audio`, `screenshot`, `sd remount`, `config`, `power` | bring-up extension | this checklist |
 
 ## 0. Before applying power
 
@@ -146,6 +146,13 @@ until the reason is known.
 7. `tap`: the border flashes for `tap_feedback_ms` (250 ms by default).
 8. Leave the face on for five minutes and confirm the pixel shift moves the
    whole scene by 1-2 px without a visible jump.
+9. `display` prints the resolution, panel brightness, buffer configuration and
+   the panel/touch driver names; confirm 410 x 502, double buffer, internal
+   DMA and the configured brightness.
+10. If the card is mounted, `screenshot /sdcard/shot.bmp` captures the live
+    LVGL scene; open the BMP on a PC and compare it with the glass. The
+    snapshot is what LVGL draws, the glass is what the panel shows - a
+    difference is a panel/touch/init finding, not a UI finding.
 
 Pass: the full 410 x 502 area is correct, black is black (not dark grey), the
 numerals are crisp at brightness 55, and no command leaves the panel stuck on
@@ -241,8 +248,9 @@ missing card never prevents boot.
    network sync, and the displayed time must already be correct. The RTC is
    the reference between syncs; do not adjust it by hand.
 5. Failure test: use a wrong password. The icon turns red with a slash, the
-   clock keeps running from the RTC, and the next attempt is scheduled
-   `sync_hours` later. The watch must not block the UI while trying.
+   clock keeps running from the RTC, and the next attempt is scheduled 5
+   minutes later (then 15 and 30, before the normal `sync_hours`). The watch
+   must not block the UI while trying.
 6. `time` after a sync. The seconds must advance and the timezone name must be
    the one you expect.
 

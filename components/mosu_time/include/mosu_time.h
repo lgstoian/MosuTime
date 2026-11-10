@@ -32,8 +32,9 @@ esp_err_t mosu_time_set_epoch(time_t utc);
 esp_err_t mosu_time_set_epoch_manual(time_t utc);
 
 /*
- * Apply an IANA name ("Europe/Bucharest") or a POSIX TZ string.
- * IANA names are mapped to the POSIX form newlib understands.
+ * Apply an IANA name ("Europe/Bucharest"), a POSIX TZ string or a numeric UTC
+ * offset ("7200", "+2", "-5.5").  IANA names are mapped to the POSIX form
+ * newlib understands; offsets are spelled as POSIX before they are stored.
  * The chosen zone is remembered in NVS.
  */
 bool mosu_time_apply_timezone(const char *tz);

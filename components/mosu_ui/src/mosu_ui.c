@@ -2,12 +2,15 @@
  * SPDX-FileCopyrightText: 2026 Stoian Alexandru
  * SPDX-License-Identifier: MIT
  */
+#include <stdio.h>
 #include <string.h>
 
+#include "esp_heap_caps.h"
 #include "esp_lvgl_port.h"
 #include "esp_log.h"
 #include "lvgl.h"
 
+#include "mosu_core/mosu_bmp.h"
 #include "mosu_core/mosu_core.h"
 #include "mosu_core/mosu_layout.h"
 #include "mosu_ui.h"
@@ -575,4 +578,93 @@ void mosu_ui_test_pattern(mosu_ui_test_t pattern)
         invalidate();
         lvgl_port_unlock();
     }
+}
+
+esp_err_t mosu_ui_snapshot(const char *path)
+{
+#if !CONFIG_LV_USE_SNAPSHOT
+    (void)path;
+    return ESP_ERR_NOT_SUPPORTED;
+#else
+    if (!path || !s_screen) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    const uint16_t width = MOSU_LCD_W;
+    const uint16_t height = MOSU_LCD_H;
+    const size_t pixels_size = (size_t)width * height * 2u;
+
+    if (!lvgl_port_lock(1000)) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    uint8_t *pixels =
+        heap_caps_malloc(pixels_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!pixels) {
+        pixels = heap_caps_malloc(pixels_size, MALLOC_CAP_DEFAULT);
+    }
+    lv_draw_buf_t *draw_buf =
+        pixels ? lv_malloc(sizeof(lv_draw_buf_t)) : NULL;
+    if (!pixels || !draw_buf) {
+        lvgl_port_unlock();
+        heap_caps_free(pixels);
+        lv_free(draw_buf);
+        return ESP_ERR_NO_MEM;
+    }
+
+    memset(draw_buf, 0, sizeof(*draw_buf));
+    lv_result_t result = lv_draw_buf_init(draw_buf, width, height,
+                                          LV_COLOR_FORMAT_RGB565, width * 2,
+                                          pixels, pixels_size);
+    if (result == LV_RESULT_OK) {
+        result = lv_snapshot_take_to_draw_buf(s_screen,
+                                              LV_COLOR_FORMAT_RGB565, draw_buf);
+    }
+    lvgl_port_unlock();
+
+    if (result != LV_RESULT_OK) {
+        lv_free(draw_buf);
+        heap_caps_free(pixels);
+        ESP_LOGE(TAG, "snapshot failed");
+        return ESP_FAIL;
+    }
+
+    FILE *file = fopen(path, "wb");
+    if (!file) {
+        lv_free(draw_buf);
+        heap_caps_free(pixels);
+        ESP_LOGE(TAG, "cannot open %s", path);
+        return ESP_FAIL;
+    }
+
+    uint8_t header[MOSU_BMP_HEADER_SIZE];
+    mosu_bmp_header(header, width, height);
+    const uint32_t stride = mosu_bmp_stride(width);
+    uint8_t *row = heap_caps_malloc(stride, MALLOC_CAP_DEFAULT);
+    bool ok = row != NULL && fwrite(header, 1, sizeof(header), file) ==
+                                  sizeof(header);
+
+    for (int y = (int)height - 1; y >= 0 && ok; y--) {
+        const uint16_t *src =
+            (const uint16_t *)(pixels + (size_t)y * width * 2u);
+        mosu_bmp_row_rgb565(row, src, width);
+        if (fwrite(row, 1, stride, file) != stride) {
+            ok = false;
+        }
+    }
+
+    fclose(file);
+    heap_caps_free(row);
+    lv_free(draw_buf);
+    heap_caps_free(pixels);
+
+    if (!ok) {
+        ESP_LOGE(TAG, "failed to write %s", path);
+        remove(path);
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "snapshot written to %s (%dx%d)", path, width, height);
+    return ESP_OK;
+#endif
 }

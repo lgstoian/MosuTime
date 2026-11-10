@@ -14,9 +14,11 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_rom_sys.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -463,11 +465,71 @@ void mosu_board_imu_dump(void)
 
 /* --------------------------------------------------------------- boot IO */
 
+/*
+ * A slave that lost power in the middle of a transfer can keep SDA low by
+ * holding the last bit it received.  The I2C peripheral refuses to start on a
+ * bus that does not look idle, so every probe would fail until the next reset.
+ *
+ * Nine clock pulses let such a slave finish the byte it is stuck in and see a
+ * NACK; the closing STOP (SDA rising while SCL is high) then returns the bus to
+ * the idle state.  This runs only before the driver owns the pins.
+ */
+static void bus_recover(void)
+{
+    const gpio_config_t cfg = {
+        .pin_bit_mask =
+            (1ULL << MOSU_PIN_I2C_SDA) | (1ULL << MOSU_PIN_I2C_SCL),
+        .mode = GPIO_MODE_INPUT_OUTPUT_OD,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    if (gpio_config(&cfg) != ESP_OK) {
+        ESP_LOGW(TAG, "I2C recovery pins could not be configured");
+        return;
+    }
+
+    /* Both lines idle high; give a slow pull-up time to charge the bus. */
+    gpio_set_level(MOSU_PIN_I2C_SDA, 1);
+    gpio_set_level(MOSU_PIN_I2C_SCL, 1);
+    esp_rom_delay_us(20);
+
+    if (gpio_get_level(MOSU_PIN_I2C_SDA) == 0) {
+        ESP_LOGW(TAG, "SDA held low, clocking the bus free");
+        for (int i = 0; i < 9 && gpio_get_level(MOSU_PIN_I2C_SDA) == 0; i++) {
+            gpio_set_level(MOSU_PIN_I2C_SCL, 0);
+            esp_rom_delay_us(5);
+            gpio_set_level(MOSU_PIN_I2C_SCL, 1);
+            esp_rom_delay_us(5);
+        }
+
+        /* STOP: SDA low then high while SCL stays high. */
+        gpio_set_level(MOSU_PIN_I2C_SDA, 0);
+        esp_rom_delay_us(5);
+        gpio_set_level(MOSU_PIN_I2C_SCL, 1);
+        esp_rom_delay_us(5);
+        gpio_set_level(MOSU_PIN_I2C_SDA, 1);
+        esp_rom_delay_us(5);
+
+        if (gpio_get_level(MOSU_PIN_I2C_SDA) == 0) {
+            /* The short on SDA is not a stuck slave: check the hardware. */
+            ESP_LOGW(TAG, "SDA still low, I2C will probably fail");
+        }
+    }
+
+    /* Hand the pins back untouched so i2c_new_master_bus() configures them
+     * exactly the way its own driver expects. */
+    gpio_reset_pin(MOSU_PIN_I2C_SDA);
+    gpio_reset_pin(MOSU_PIN_I2C_SCL);
+}
+
 esp_err_t mosu_board_i2c_start(void)
 {
     if (s_bus) {
         return ESP_OK;
     }
+
+    bus_recover();
 
     i2c_master_bus_config_t cfg = {
         .i2c_port = I2C_NUM_0,

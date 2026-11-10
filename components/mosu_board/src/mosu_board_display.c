@@ -8,6 +8,8 @@
  * display can be switched off entirely (0x28), which is what makes the
  * screen-off power story viable on an AMOLED.
  */
+#include <string.h>
+
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_check.h"
@@ -29,12 +31,16 @@ static const char *TAG = "mosu_disp";
 
 #define LCD_OPCODE_WRITE_CMD 0x02u
 #define LCD_SPI_NUM SPI2_HOST
+/* Partial framebuffers of 50 lines: small enough for internal DMA memory,
+ * large enough that LVGL rarely splits a full-screen redraw. */
+#define DISP_BUF_LINES 50
 
 static esp_lcd_panel_handle_t s_panel;
 static esp_lcd_panel_io_handle_t s_io;
 static esp_lcd_touch_handle_t s_touch;
 static lv_display_t *s_display;
 static bool s_display_on;
+static uint8_t s_brightness;
 
 /* Vendor initialisation sequence for this panel revision. */
 static const sh8601_lcd_init_cmd_t s_init_cmds[] = {
@@ -148,7 +154,11 @@ esp_err_t mosu_board_display_start(void)
 
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     port_cfg.task_priority = 4;
-    port_cfg.task_stack = 8192;
+    /* A full-screen LVGL redraw (a new face, a scrolled list) runs the
+     * renderer and the label cache on one stack; 8 KB ran short.  The
+     * console's `tasks` command shows the real high-water mark on hardware,
+     * so tune this from that number instead of guessing. */
+    port_cfg.task_stack = 12288;
     port_cfg.task_affinity = 1;
     port_cfg.timer_period_ms = 30;
     ESP_RETURN_ON_ERROR(lvgl_port_init(&port_cfg), TAG, "lvgl port");
@@ -159,7 +169,7 @@ esp_err_t mosu_board_display_start(void)
         /* Two 50-line buffers in internal DMA memory: the QSPI driver can
          * stream from them directly, and 82 KB is affordable next to Wi-Fi
          * and the TLS session used for the timezone lookup. */
-        .buffer_size = MOSU_LCD_H_RES * 50,
+        .buffer_size = MOSU_LCD_H_RES * DISP_BUF_LINES,
         .double_buffer = true,
         .hres = MOSU_LCD_H_RES,
         .vres = MOSU_LCD_V_RES,
@@ -217,6 +227,7 @@ esp_err_t mosu_board_brightness_set(uint8_t percent)
     if (percent > 100) {
         percent = 100;
     }
+    s_brightness = percent;
 
     uint8_t value = (uint8_t)(((uint32_t)percent * 255 + 50) / 100);
     uint32_t cmd = ((uint32_t)0x51 << 8) | ((uint32_t)LCD_OPCODE_WRITE_CMD << 24);
@@ -254,6 +265,27 @@ esp_err_t mosu_board_display_off(void)
 bool mosu_board_touch_active(void)
 {
     return gpio_get_level(MOSU_PIN_TOUCH_INT) == 0;
+}
+
+void mosu_board_display_info(mosu_board_display_info_t *out)
+{
+    if (!out) {
+        return;
+    }
+
+    memset(out, 0, sizeof(*out));
+    out->width = MOSU_LCD_H_RES;
+    out->height = MOSU_LCD_V_RES;
+    out->brightness = s_brightness;
+    out->on = s_display_on;
+    /* These come from the fixed configuration above, not from the driver:
+     * lvgl_port does not expose its buffer allocation back to us. */
+    out->draw_buffer_pixels = MOSU_LCD_H_RES * DISP_BUF_LINES;
+    out->double_buffer = true;
+    out->buffer_dma = true;
+    out->buffer_spiram = false;
+    out->panel = "SH8601/CO5300";
+    out->touch = "FT3168";
 }
 
 esp_err_t mosu_board_enable_touch_wake(bool enable)

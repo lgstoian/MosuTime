@@ -3,6 +3,7 @@ idf_component_register(
     INCLUDE_DIRS "include"
     REQUIRES
         mosu_config
+        mosu_policy
         mosu_time
         esp_wifi
         esp_netif

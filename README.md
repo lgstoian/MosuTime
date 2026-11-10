@@ -77,7 +77,8 @@ first; the project checks the compiler version at configure time.
 
 The partition table is 32 MB with two OTA application slots and a data
 partition for NVS. The default configuration enables automatic light sleep,
-DFS, PSRAM, the certificate bundle for HTTPS, and 1000 Hz FreeRTOS ticks.
+DFS, PSRAM, the certificate bundle for optional HTTPS endpoints, and 1000 Hz
+FreeRTOS ticks.
 
 ## SD card
 
@@ -150,7 +151,7 @@ list and the replacement procedure are in [`docs/voice.md`](docs/voice.md).
 | Touch | screen on; the touch interrupt also wakes the CPU from light sleep |
 | Double tap | a short border flash, then the time and weekday are spoken |
 | Exact hour | only the hour phrase is played: *"Este ora două."* |
-| Wi-Fi sync | at boot and every `sync_hours`; the radio is switched off immediately after |
+| Wi-Fi sync | at boot and every `sync_hours`, with 5/15/30 minute retries after a failure; the radio is switched off immediately after |
 | No time yet | `--` is shown until the RTC, manual time or SNTP provides a date |
 
 The Wi-Fi icon is grey before the first successful sync, green after a
@@ -206,7 +207,7 @@ wrist detectors, seven-segment renderer) is shared by the firmware, the host
 tests and the simulator.
 
 ```sh
-# host tests (312 checks)
+# host tests (440 checks)
 cmake -S test/host -B test/host/build
 cmake --build test/host/build
 ./test/host/build/mosu_tests
@@ -226,6 +227,7 @@ PM, low battery with a failed sync, and the unknown-time state.
 components/
   mosu_core/    pure C: no ESP-IDF, shared with tests and simulator
   mosu_session/ pure C: screen/tap/battery state machine
+  mosu_policy/  pure C: timezone offsets, geo parsing, sync backoff
   mosu_config/  INI parser + NVS last-good cache
   mosu_board/   the only board-specific code
   mosu_time/    RTC, SNTP, IANA -> POSIX timezone table
@@ -255,6 +257,8 @@ has to provide. The rest of the documentation:
 - [`docs/family-ro.md`](docs/family-ro.md) - the one-page guide for the family
 - [`docs/accessibility/README.md`](docs/accessibility/README.md) - print-size
   and contrast checks
+- [`AGENTS.md`](AGENTS.md) and [`BREADCRUMBS.md`](BREADCRUMBS.md) - orientation
+  and the "where is it" map for contributors
 
 ## Console
 
@@ -262,13 +266,16 @@ The USB/UART console is for maintenance, not for the wearer:
 
 ```
 help status time sync say settime bright N vol N tap reboot
-i2c pmu rtc imu pm heap tasks config
+i2c pmu rtc imu pm heap tasks display config
 test screen [colors|grid|corners|off] | test touch | test audio
-sd remount | power screen on|off | power wifi | power idle
+screenshot [path] | sd remount
+power screen on|off | power wifi | power idle
 ```
 
 `bright` and `vol` change the value at runtime; edit `mosu.cfg` to make it
-permanent.
+permanent. `screenshot /sdcard/shot.bmp` captures the live LVGL scene as a
+24-bit BMP on the card, which is how a real watch can be photographed without a
+camera; `display` prints the panel and buffer configuration.
 
 ## License
 

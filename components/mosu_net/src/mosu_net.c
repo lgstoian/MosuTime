@@ -26,6 +26,7 @@
 #include "freertos/task.h"
 
 #include "mosu_net.h"
+#include "mosu_policy.h"
 #include "mosu_time.h"
 
 static const char *TAG = "mosu_net";
@@ -118,16 +119,21 @@ static bool connect_to(const mosu_wifi_cfg_t *net, uint32_t timeout_ms)
     return (bits & BIT_CONNECTED) != 0;
 }
 
-static bool fetch_timezone(char *out, size_t out_len)
+/*
+ * One timezone request.  retryable is only set for failures that are worth a
+ * second attempt: a timeout, a connection error or an HTTP 5xx.  A 4xx means
+ * the URL is wrong and retrying would just waste battery.
+ */
+static bool timezone_request(const char *url, char *body, size_t body_len,
+                             bool *retryable)
 {
-    if (!s_cfg->clock.auto_timezone || s_cfg->clock.geo_url[0] == '\0') {
-        return false;
-    }
+    *retryable = false;
 
-    const char *url = s_cfg->clock.geo_url;
     esp_http_client_config_t http_cfg = {
         .url = url,
         .timeout_ms = 8000,
+        /* Plain HTTP is the default (cheaper, no certificate bundle), but a
+         * user who configures https:// still gets a verified connection. */
         .crt_bundle_attach =
             strncmp(url, "https://", 8) == 0 ? esp_crt_bundle_attach : NULL,
     };
@@ -137,69 +143,100 @@ static bool fetch_timezone(char *out, size_t out_len)
         return false;
     }
 
-    char body[256] = {0};
+    body[0] = '\0';
     bool ok = false;
 
-    if (esp_http_client_open(client, 0) == ESP_OK) {
-        esp_http_client_fetch_headers(client);
-        int status = esp_http_client_get_status_code(client);
-        int read = esp_http_client_read(client, body, sizeof(body) - 1);
-        if (status != 200) {
-            ESP_LOGW(TAG, "timezone service returned HTTP %d", status);
-        } else if (read > 0) {
-            body[read] = '\0';
-
-            const char *marker = strstr(body, "\"timezone\"");
-            if (marker) {
-                const char *colon = strchr(marker, ':');
-                const char *first = colon ? strchr(colon, '"') : NULL;
-                const char *last = first ? strchr(first + 1, '"') : NULL;
-                if (first && last && last > first + 1) {
-                    size_t len = (size_t)(last - first - 1);
-                    if (len < out_len) {
-                        memcpy(out, first + 1, len);
-                        out[len] = '\0';
-                        ok = true;
-                    }
-                }
-            } else {
-                /* ipapi.co/timezone answers with plain text. */
-                char *start = body;
-                while (*start && (*start == ' ' || *start == '\n' ||
-                                  *start == '\r' || *start == '\t')) {
-                    start++;
-                }
-                char *finish = start + strlen(start);
-                while (finish > start && (finish[-1] == '\n' ||
-                                          finish[-1] == '\r' ||
-                                          finish[-1] == ' ' ||
-                                          finish[-1] == '\t')) {
-                    *--finish = '\0';
-                }
-                if (*start && (size_t)(finish - start) < out_len) {
-                    memcpy(out, start, (size_t)(finish - start) + 1);
-                    ok = true;
-                }
-            }
-
-            /* An error page or an HTML body must never reach setenv(). */
-            if (ok && !mosu_config_timezone_ok(out)) {
-                ESP_LOGW(TAG, "timezone answer is not a zone: '%s'", out);
-                ok = false;
-            }
-        }
+    esp_err_t err = esp_http_client_open(client, 0);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "timezone request failed: %s", esp_err_to_name(err));
+        *retryable = err == ESP_ERR_TIMEOUT || err == ESP_ERR_HTTP_CONNECT;
+        goto done;
     }
 
+    if (esp_http_client_fetch_headers(client) < 0) {
+        ESP_LOGW(TAG, "timezone response has no headers");
+        *retryable = true;
+        goto done;
+    }
+
+    int status = esp_http_client_get_status_code(client);
+    if (status >= 500 && status <= 599) {
+        ESP_LOGW(TAG, "timezone service returned HTTP %d", status);
+        *retryable = true;
+        goto done;
+    }
+    if (status != 200) {
+        ESP_LOGW(TAG, "timezone service returned HTTP %d", status);
+        goto done;
+    }
+
+    int read = esp_http_client_read(client, body, (int)(body_len - 1));
+    if (read <= 0) {
+        ESP_LOGW(TAG, "timezone response was empty");
+        *retryable = read < 0;
+        goto done;
+    }
+
+    body[read] = '\0';
+    ok = true;
+
+done:
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
+    return ok;
+}
 
-    if (ok) {
-        ESP_LOGI(TAG, "network timezone: %s", out);
-    } else {
+static bool fetch_timezone(mosu_policy_geo_t *geo)
+{
+    memset(geo, 0, sizeof(*geo));
+
+    if (!s_cfg->clock.auto_timezone || s_cfg->clock.geo_url[0] == '\0') {
+        return false;
+    }
+
+    const char *url = s_cfg->clock.geo_url;
+    char body[256] = {0};
+    bool got = false;
+
+    /* One bounded retry.  The radio is already on, so a second request costs
+     * far less than waiting hours for the next sync window. */
+    for (int attempt = 0; attempt < 2; attempt++) {
+        bool retryable = false;
+        got = timezone_request(url, body, sizeof(body), &retryable);
+        if (got) {
+            if (attempt > 0) {
+                ESP_LOGI(TAG, "timezone request succeeded on retry");
+            }
+            break;
+        }
+        if (!retryable || attempt == 1) {
+            break;
+        }
+        ESP_LOGW(TAG, "transient timezone failure, retrying once");
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+
+    if (!got) {
         ESP_LOGW(TAG, "timezone lookup failed, keeping %s",
                  mosu_time_timezone());
+        return false;
     }
-    return ok;
+
+    mosu_policy_parse_geo(body, geo);
+    if (geo->zone[0] == '\0' && geo->posix[0] == '\0') {
+        ESP_LOGW(TAG, "timezone answer is not a zone: '%s'", body);
+        return false;
+    }
+
+    if (geo->zone[0] && geo->posix[0]) {
+        ESP_LOGI(TAG, "network timezone: %s (offset %s)", geo->zone,
+                 geo->posix);
+    } else if (geo->zone[0]) {
+        ESP_LOGI(TAG, "network timezone: %s", geo->zone);
+    } else {
+        ESP_LOGI(TAG, "network timezone offset: %s", geo->posix);
+    }
+    return true;
 }
 
 static bool sync_clock(void)
@@ -230,11 +267,11 @@ static void radio_off_if_possible(void)
     s_wifi_started = false;
 }
 
-static void run_sync(void)
+static bool run_sync(void)
 {
     if (s_cfg->wifi_count == 0) {
         s_state = MOSU_NET_IDLE;
-        return;
+        return true;
     }
 
     bool connected = false;
@@ -249,37 +286,70 @@ static void run_sync(void)
         s_state = MOSU_NET_FAILED;
         radio_off_if_possible();
         ESP_LOGW(TAG, "all configured networks failed");
-        return;
+        return false;
     }
 
     s_state = MOSU_NET_CONNECTED;
 
-    char tz[64];
-    if (fetch_timezone(tz, sizeof(tz))) {
-        mosu_time_apply_timezone(tz);
+    mosu_policy_geo_t geo;
+    if (fetch_timezone(&geo)) {
+        /* Prefer the name when the table knows it; otherwise the numeric
+         * offset is still better than keeping a zone from another country. */
+        bool applied = false;
+        if (geo.zone[0]) {
+            applied = mosu_time_apply_timezone(geo.zone);
+            if (!applied && geo.posix[0]) {
+                ESP_LOGI(TAG, "could not map '%s', using the numeric offset",
+                         geo.zone);
+            }
+        }
+        if (!applied && geo.posix[0]) {
+            applied = mosu_time_apply_timezone(geo.posix);
+        }
+        if (!applied) {
+            ESP_LOGW(TAG, "timezone lookup failed, keeping %s",
+                     mosu_time_timezone());
+        }
     }
 
-    if (!sync_clock()) {
+    bool clock_ok = sync_clock();
+    if (!clock_ok) {
         ESP_LOGW(TAG, "SNTP did not answer");
+        s_state = MOSU_NET_FAILED;
     }
 
     radio_off_if_possible();
-    if (!s_cfg->clock.wifi_always_on) {
+    if (!s_cfg->clock.wifi_always_on && clock_ok) {
         s_state = MOSU_NET_IDLE;
     }
+    return clock_ok;
 }
 
 static void net_task(void *arg)
 {
     (void)arg;
     s_next_sync_s = 0;
+    uint8_t fail_count = 0;
 
     for (;;) {
         uint32_t now = uptime_s();
         if (s_sync_requested || (int32_t)(now - s_next_sync_s) >= 0) {
             s_sync_requested = false;
-            run_sync();
-            s_next_sync_s = uptime_s() + (uint32_t)s_cfg->clock.sync_hours * 3600u;
+            bool ok = run_sync();
+            if (ok) {
+                fail_count = 0;
+            } else if (fail_count < UINT8_MAX) {
+                fail_count++;
+            }
+
+            uint32_t wait = mosu_policy_next_sync_s(
+                fail_count, s_cfg->clock.sync_hours);
+            s_next_sync_s = uptime_s() + wait;
+
+            if (!ok) {
+                ESP_LOGW(TAG, "sync failed (%u in a row), next try in %u s",
+                         (unsigned)fail_count, (unsigned)wait);
+            }
         }
 
         uint32_t wait_s = 60;

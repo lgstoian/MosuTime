@@ -16,6 +16,7 @@
 
 #include "mosu_board.h"
 #include "mosu_config_store.h"
+#include "mosu_policy.h"
 #include "mosu_time.h"
 
 static const char *TAG = "mosu_time";
@@ -160,6 +161,19 @@ bool mosu_time_apply_timezone(const char *tz)
     if (!tz || !*tz) {
         return false;
     }
+
+    /* A numeric offset ("7200", "+2", "-5.5") is not a TZ string, but it is
+     * what the geolocation service returns as a fallback.  Store the POSIX
+     * spelling so the label in NVS is always parseable. */
+    char posix[MOSU_CFG_TZ_MAX];
+    if (mosu_policy_offset_to_posix(tz, posix, sizeof(posix))) {
+        return set_zone(posix, true);
+    }
+
+    if (!mosu_config_timezone_ok(tz)) {
+        return false;
+    }
+
     /* Do not override a good zone with an unmapped geolocation result. */
     if (!posix_for_zone(tz) && strchr(tz, '/')) {
         ESP_LOGW(TAG, "unknown IANA zone '%s', keeping %s", tz, s_tz);

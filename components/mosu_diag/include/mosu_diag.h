@@ -14,6 +14,8 @@ extern "C" {
 #endif
 
 typedef struct {
+    /* Wake the face for one normal activity window without forcing it on. */
+    void (*wake)(void);
     void (*screen_on)(void);
     void (*screen_off)(void);
     /* Receives a mosu_ui_test_t value; diag does not depend on mosu_ui. */

@@ -18,7 +18,7 @@ typedef enum {
     MOSU_NET_IDLE = 0,   /* waiting for the next window, or no networks */
     MOSU_NET_CONNECTING, /* trying the configured access points */
     MOSU_NET_CONNECTED,  /* associated, time freshly synced */
-    MOSU_NET_FAILED,     /* every configured access point failed */
+    MOSU_NET_FAILED,     /* the last attempt failed (Wi-Fi or SNTP) */
 } mosu_net_state_t;
 
 typedef struct {

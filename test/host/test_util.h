@@ -34,3 +34,5 @@ extern int g_failures;
 
 void test_session(void);
 void test_config_extra(void);
+void test_bmp(void);
+void test_policy(void);

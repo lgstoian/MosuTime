@@ -59,8 +59,9 @@ Practical rules, all enforced by `components/mosu_config`:
 | `display.pixel_shift_sec` | 0…3600 | 180 | Burn-in guard interval; 0 disables it. |
 | `display.tap_feedback_ms` | 0…2000 | 250 | Border flash after a double tap; 0 disables it. |
 | `clock.timezone` | IANA or POSIX | `Europe/Bucharest` | Used when `auto_timezone` is false or the lookup fails. |
-| `clock.auto_timezone` | bool | true | Ask the network for the zone by IP. Unknown zones are ignored. |
-| `clock.sync_hours` | 1…168 | 6 | Hours between Wi-Fi syncs. |
+| `clock.auto_timezone` | bool | true | Ask the network for the zone by IP. An unknown name falls back to the returned UTC offset. |
+| `clock.geo_url` | URL | `http://ip-api.com/line/?fields=timezone,offset` | Timezone service. Plain HTTP is cheaper; an explicit `https://` URL is still supported. |
+| `clock.sync_hours` | 1…168 | 6 | Hours between successful syncs. The first three failures retry after 5, 15 and 30 minutes. |
 | `clock.wifi_always_on` | bool | false | `true` keeps the radio on and costs much more. Leave it false. |
 | `clock.manual_time` | `"YYYY-MM-DD HH:MM"` | empty | Fallback only when there is no valid RTC and no network. |
 | `wifi.networkN_ssid` / `_pass` | text, N=1…8 | — | Tried in order, 15 s each. 2.4 GHz networks only. |
@@ -120,7 +121,8 @@ sync
 Watch the console for the join, `network timezone: ...` and `clock synced`.
 The Wi-Fi icon is grey before the first success, green after a success, and
 red with a slash after a failure. A failure does not stop the clock; it keeps
-running from the PCF85063 and retries after `sync_hours`.
+running from the PCF85063 and retries after 5, 15 and 30 minutes before the
+normal `sync_hours` interval resumes.
 
 If the watch is used in a different country, leave `auto_timezone = true` so
 the IP lookup can set the zone. If you prefer a fixed zone, set

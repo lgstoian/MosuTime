@@ -187,10 +187,11 @@ static void handle_line(char *line)
     if (!strcmp(line, "help") || !strcmp(line, "?")) {
         printf("commands:\n");
         printf("  status time sync say settime bright vol tap reboot\n");
-        printf("  i2c pmu rtc imu pm heap tasks config\n");
+        printf("  i2c pmu rtc imu pm heap tasks display config\n");
         printf("  test screen [colors|grid|corners|off]\n");
         printf("  test touch | test audio | sd remount\n");
-        printf("  power screen on|off | power wifi | power idle\n");
+        printf("  screenshot [path] | power screen on|off | power wifi |\n");
+        printf("  power idle\n");
     } else if (!strcmp(line, "status")) {
         print_status();
     } else if (!strcmp(line, "time")) {
@@ -271,6 +272,17 @@ static void handle_line(char *line)
         mosu_board_heap_dump();
     } else if (!strcmp(line, "tasks")) {
         mosu_board_tasks_dump();
+    } else if (!strcmp(line, "display")) {
+        mosu_board_display_info_t info;
+        mosu_board_display_info(&info);
+        printf("display: %ldx%ld, %s, panel brightness %u%%, configured %u%%\n",
+               (long)info.width, (long)info.height, info.on ? "on" : "off",
+               (unsigned)info.brightness,
+               s_cfg ? (unsigned)s_cfg->display.brightness : 0u);
+        printf("  buffer: %lu px, double %d, dma %d, spiram %d\n",
+               (unsigned long)info.draw_buffer_pixels, info.double_buffer,
+               info.buffer_dma, info.buffer_spiram);
+        printf("  panel: %s, touch: %s\n", info.panel, info.touch);
     } else if (!strcmp(line, "config")) {
         print_config();
     } else if (!strcmp(line, "test screen")) {
@@ -289,6 +301,24 @@ static void handle_line(char *line)
         esp_err_t err = mosu_board_sdcard_remount();
         printf("sd remount: %s, %s\n", esp_err_to_name(err),
                mosu_board_sdcard_ready() ? "mounted" : "not mounted");
+    } else if (!strcmp(line, "screenshot") ||
+               !strncmp(line, "screenshot ", 11)) {
+        const char *path = "/sdcard/shot.bmp";
+        if (!strncmp(line, "screenshot ", 11) && line[11] != '\0') {
+            path = line + 11;
+        }
+
+        /* The panel may be off.  The hook only queues a request; give the
+         * app task time to switch the face on and repaint before capturing. */
+        if (s_hooks.wake) {
+            s_hooks.wake();
+            vTaskDelay(pdMS_TO_TICKS(300));
+        } else if (s_hooks.screen_on) {
+            s_hooks.screen_on();
+            vTaskDelay(pdMS_TO_TICKS(300));
+        }
+        esp_err_t err = mosu_ui_snapshot(path);
+        printf("screenshot %s: %s\n", path, esp_err_to_name(err));
     } else if (!strcmp(line, "power screen on")) {
         if (!s_hooks.screen_on) {
             printf("no screen on hook\n");

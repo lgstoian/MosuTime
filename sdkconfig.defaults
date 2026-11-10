@@ -22,10 +22,22 @@ CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
 # --- RTOS / power -----------------------------------------------------------
 CONFIG_FREERTOS_HZ=1000
 CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_VTASKLIST_INCLUDE_COREID=y
 CONFIG_PM_ENABLE=y
 CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
 CONFIG_ESP_PHY_MAC_BB_PD=y
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+# A reboot restores the time from the RTC; a frozen watch does not.
+CONFIG_ESP_TASK_WDT_PANIC=y
+
+# --- LVGL -------------------------------------------------------------------
+# LVGL's fixed 64 KB pool is internal RAM we can spend on Wi-Fi/TLS.  The
+# system heap is large (PSRAM) and our object tree is created once.
+CONFIG_LV_USE_CLIB_MALLOC=y
+# We have no theme-driven widgets; avoid a timer for style transitions.
+CONFIG_LV_THEME_DEFAULT_TRANSITION_TIME=0
+# The console can capture the live face to a BMP on the SD card.
+CONFIG_LV_USE_SNAPSHOT=y
 
 # --- Storage ----------------------------------------------------------------
 CONFIG_FATFS_LFN_HEAP=y

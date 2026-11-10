@@ -58,6 +58,14 @@ void mosu_ui_refresh(void);
  */
 void mosu_ui_test_pattern(mosu_ui_test_t pattern);
 
+/*
+ * Capture the current LVGL scene as a 24-bit BMP on the SD card.  On hardware
+ * this is the only way to see exactly what the watch draws, independent of
+ * the panel's QSPI stream.  The call allocates the RGB565 snapshot in PSRAM
+ * and releases it before returning.
+ */
+esp_err_t mosu_ui_snapshot(const char *path);
+
 #ifdef __cplusplus
 }
 #endif

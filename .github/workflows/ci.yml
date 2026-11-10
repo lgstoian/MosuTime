@@ -16,6 +16,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Catch syntax errors in every Python tool, including the ones that are
+      # not exercised by the steps below.
+      - name: Compile the Python tools
+        run: python -m compileall -q tools
+
       - name: Configure and run the host tests
         run: |
           cmake -S test/host -B test/host/build -DCMAKE_BUILD_TYPE=Debug
@@ -50,6 +55,18 @@ jobs:
           target: esp32s3
           path: "."
 
+      # Informational only: reuse the build directory from the previous step
+      # and print the size report.  A size regression must not hide the build
+      # result, so this step is allowed to fail without failing the job.
+      - name: Print the firmware size
+        continue-on-error: true
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: "."
+          command: idf.py size
+
   static:
     name: Static analysis
     runs-on: ubuntu-latest
@@ -68,12 +85,8 @@ jobs:
       - name: cppcheck the pure C components
         run: |
           set -eu
-          sources="components/mosu_core/src components/mosu_config/src"
-          includes="-I components/mosu_core/include -I components/mosu_config/include"
-          if [ -d components/mosu_session/src ]; then
-            sources="$sources components/mosu_session/src"
-            includes="$includes -I components/mosu_session/include"
-          fi
+          sources="components/mosu_core/src components/mosu_config/src components/mosu_session/src components/mosu_policy/src"
+          includes="-I components/mosu_core/include -I components/mosu_config/include -I components/mosu_session/include -I components/mosu_policy/include"
           # Word splitting is intended: the lists above are argument lists.
           cppcheck \
             --enable=warning,performance,portability \

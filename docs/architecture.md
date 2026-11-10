@@ -20,6 +20,7 @@ not in the amount of code, it is in what is *not* running.
 
  mosu_config (INI + NVS)      mosu_core (pure C, no ESP-IDF)
                               mosu_session (pure C state machine)
+                              mosu_policy (pure C network policy)
 ```
 
 `mosu_core` is compiled three times: into the firmware, into the host test
@@ -103,10 +104,12 @@ displayed and spoken.
   changes.
 * SNTP is the authoritative source. `mosu_time_set_epoch` writes the system
   clock *and* the RTC, so the next boot without Wi-Fi is correct.
-* `mosu_net` asks a geolocation service for the IANA zone (plain text from
-  `ipapi.co/timezone/`, or JSON with a `timezone` key from `ip-api.com`).
-  `mosu_time` maps the common IANA names to POSIX TZ strings because newlib
-  does not read tzdata. Unknown zones are ignored rather than guessed.
+* `mosu_net` asks a geolocation service for the zone. The default endpoint is
+  `http://ip-api.com/line/?fields=timezone,offset`, which returns the IANA name
+  and a UTC offset on two lines; HTTPS works if configured explicitly but costs
+  a TLS handshake. `mosu_time` maps the common IANA names to POSIX TZ strings
+  because newlib does not read tzdata. An unknown name falls back to the numeric
+  offset as a fixed POSIX zone rather than guessing DST.
 * The chosen zone is stored in NVS as well as in the config, so a network zone
   survives a reboot even when the SD card is missing.
 
@@ -137,15 +140,17 @@ The default `wifi_always_on = false` makes the radio a guest:
 
 ```
 connect to network1..networkN (15 s each)
-  -> geolocation (8 s timeout, certificate bundle for HTTPS)
+  -> geolocation (8 s timeout, one retry on a transient failure)
   -> SNTP (15 s timeout, two servers)
   -> esp_wifi_disconnect() + esp_wifi_stop()
 ```
 
 If every network fails, the state becomes `FAILED` and the icon turns red. The
-next attempt is scheduled `sync_hours` later. The watch never blocks the UI on
-the network: `mosu_net` runs in its own task and the clock keeps ticking from
-the RTC.
+retry schedule is not `sync_hours` yet: the first three failures retry after 5,
+15 and 30 minutes, then the normal interval resumes. A success resets the
+counter. This keeps a transient router reboot from leaving the clock stale for
+hours. The watch never blocks the UI on the network: `mosu_net` runs in its own
+task and the clock keeps ticking from the RTC.
 
 ## Failure behaviour
 
@@ -164,11 +169,12 @@ the RTC.
 
 Three layers, each catching a different class of mistake:
 
-1. **Host tests** (`test/host`) compile `mosu_core`, `mosu_session` and the INI
-   parser with a normal C compiler and check the formatting, phrase rules,
-   battery curve, tap/wrist state machines, the screen/session rules and
-   config edge cases (312 checks, including fuzzed config documents). They are
-   also the fastest way to change a rule: no ESP-IDF, no board.
+1. **Host tests** (`test/host`) compile `mosu_core`, `mosu_session`,
+   `mosu_policy` and the INI parser with a normal C compiler and check the
+   formatting, phrase rules, battery curve, tap/wrist state machines, the
+   screen/session rules, timezone offsets/backoff, the BMP writer and config
+   edge cases (440 checks, including fuzzed config documents). They are also
+   the fastest way to change a rule: no ESP-IDF, no board.
 2. **Desktop simulator** (`sim/`) renders the real layout constants and the
    real seven-segment code into BMP files, so a visual change can be reviewed
    without any hardware.

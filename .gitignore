@@ -28,6 +28,8 @@ tools/emu/panel/target/
 # Tool caches / generated audio
 tools/.cache/
 tools/piper-models/
+__pycache__/
+*.pyc
 sd_card/voice/*.wav
 sd_card/logs/
 build.log

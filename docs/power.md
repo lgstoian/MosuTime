@@ -92,7 +92,7 @@ The state machine is driven by `main/app_main.c`, with the screen/tap state in
 | Touch wake | The touch INT line wakes the CPU; the screen-on window starts | Transient; see screen on | The touch controller itself was already powered. |
 | Screen on | Panel on at `brightness`, LVGL running, CPU capped at 160 MHz with a `NO_LIGHT_SLEEP` lock, touch polled by LVGL | ~35 mA at brightness 55 for the normal face | AMOLED current depends on lit pixels: the face is mostly black, while the `test screen colors` pattern lights much more of the panel and draws more at the same brightness. That pattern is a panel check, not the budget figure. |
 | Speaking | Screen on, ES8311 + PA enabled, I2S clocked, WAV read from SD | ~120 mA while a clip plays, plus the screen | Short bursts. Measure the whole phrase, including gaps. |
-| Wi-Fi sync | Radio on, DHCP, optional HTTPS timezone lookup, SNTP | ~120 mA for roughly 8 s on a clean success | A failure is longer: up to 15 s per network, 8 s for the timezone, 15 s for SNTP. |
+| Wi-Fi sync | Radio on, DHCP, timezone lookup (HTTP by default, HTTPS optional), SNTP | ~120 mA for roughly 8 s on a clean success | A failure is longer: up to 15 s per network, 8 s for the timezone, 15 s for SNTP. |
 
 The point estimates above come from the model. As a sanity band for planning,
 use these **ranges — also estimates, not measurements**: screen off idle

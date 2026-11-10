@@ -69,7 +69,7 @@ typedef struct {
 typedef struct {
     char timezone[MOSU_CFG_TZ_MAX]; /* POSIX TZ, always a valid fallback */
     bool auto_timezone;             /* ask the network for the zone */
-    char geo_url[MOSU_CFG_URL_MAX]; /* plain-text or ip-api JSON endpoint */
+    char geo_url[MOSU_CFG_URL_MAX]; /* plain-text, two-line name+offset, JSON */
     char ntp1[MOSU_CFG_URL_MAX];
     char ntp2[MOSU_CFG_URL_MAX];
     uint16_t sync_hours;
