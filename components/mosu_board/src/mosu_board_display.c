@@ -48,7 +48,9 @@ static const sh8601_lcd_init_cmd_t s_init_cmds[] = {
     {0x2A, (uint8_t[]){0x00, 0x16, 0x01, 0xAF}, 4, 0},
     {0x2B, (uint8_t[]){0x00, 0x00, 0x01, 0xF5}, 4, 0},
     {0x29, (uint8_t[]){0x00}, 0, 10},
-    {0x51, (uint8_t[]){0xFF}, 1, 0},
+    /* Brightness is a config value: start dark and let app_main apply it
+     * immediately after the display is ready, so there is no bright flash. */
+    {0x51, (uint8_t[]){0x00}, 1, 0},
 };
 
 /*

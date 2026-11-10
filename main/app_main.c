@@ -358,6 +358,8 @@ void app_main(void)
     err = mosu_board_display_start();
     if (err == ESP_OK) {
         s_display_ok = true;
+        /* Apply the configured brightness before anything is drawn. */
+        mosu_board_brightness_set(s_cfg.display.brightness);
         err = mosu_ui_create(&s_cfg);
         if (err == ESP_OK) {
             s_have_ui = true;
