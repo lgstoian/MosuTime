@@ -1,0 +1,11 @@
+dependencies:
+  idf: ">=5.5"
+  lvgl/lvgl: "9.6.0"
+  espressif/esp_lvgl_port: "~2.9"
+  waveshare/esp_lcd_sh8601: "~2.0"
+  espressif/esp_lcd_touch_ft5x06: "~1.1"
+  espressif/esp_codec_dev: "~1.5"
+
+  # The USB-serial console is not needed on this board: the watch talks over
+  # the UART bridge (GPIO43/44) that the board already exposes.
+  espressif/esp_lcd_panel_io_additions: "*"

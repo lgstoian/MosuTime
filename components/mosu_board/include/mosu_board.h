@@ -1,0 +1,105 @@
+/*
+ * SPDX-FileCopyrightText: 2026 Stoian Alexandru
+ * SPDX-License-Identifier: MIT
+ *
+ * The only component that knows about this particular board.
+ * A future port replaces mosu_board and nothing else.
+ */
+#pragma once
+
+#include <stdbool.h>
+#include <stdint.h>
+#include <time.h>
+
+#include "esp_err.h"
+#include "lvgl.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* ---- pins (Waveshare ESP32-S3-Touch-AMOLED-2.06) ----------------------- */
+#define MOSU_PIN_I2C_SCL 14
+#define MOSU_PIN_I2C_SDA 15
+
+#define MOSU_PIN_LCD_CS 12
+#define MOSU_PIN_LCD_PCLK 11
+#define MOSU_PIN_LCD_D0 4
+#define MOSU_PIN_LCD_D1 5
+#define MOSU_PIN_LCD_D2 6
+#define MOSU_PIN_LCD_D3 7
+#define MOSU_PIN_LCD_RST 8
+
+#define MOSU_PIN_TOUCH_RST 9
+#define MOSU_PIN_TOUCH_INT 38
+
+#define MOSU_PIN_SD_CLK 2
+#define MOSU_PIN_SD_CMD 1
+#define MOSU_PIN_SD_D0 3
+
+#define MOSU_PIN_I2S_MCLK 16
+#define MOSU_PIN_I2S_BCLK 41
+#define MOSU_PIN_I2S_LRCK 45
+#define MOSU_PIN_I2S_DOUT 40
+#define MOSU_PIN_PA_ENABLE 46
+
+#define MOSU_PIN_IMU_INT 21
+#define MOSU_PIN_RTC_INT 39
+
+#define MOSU_LCD_H_RES 410
+#define MOSU_LCD_V_RES 502
+#define MOSU_LCD_X_GAP 0x16
+
+#define MOSU_SD_MOUNT_POINT "/sdcard"
+#define MOSU_CFG_PATH MOSU_SD_MOUNT_POINT "/mosu.cfg"
+
+typedef struct {
+    bool battery_present;
+    bool vbus_present;
+    bool charging;
+    uint16_t millivolts;
+    uint8_t percent;
+} mosu_board_pmu_t;
+
+typedef struct {
+    float x;
+    float y;
+    float z;
+} mosu_board_accel_t;
+
+esp_err_t mosu_board_init(void);
+
+/* Display + touch + LVGL port.  Call once, after mosu_board_init(). */
+esp_err_t mosu_board_display_start(void);
+lv_display_t *mosu_board_display(void);
+esp_err_t mosu_board_display_on(void);
+esp_err_t mosu_board_display_off(void);
+esp_err_t mosu_board_brightness_set(uint8_t percent);
+bool mosu_board_touch_active(void);
+
+esp_err_t mosu_board_sdcard_mount(void);
+void mosu_board_sdcard_unmount(void);
+bool mosu_board_sdcard_ready(void);
+
+esp_err_t mosu_board_pmu_read(mosu_board_pmu_t *out);
+
+esp_err_t mosu_board_rtc_init(void);
+esp_err_t mosu_board_rtc_read(struct tm *utc);
+esp_err_t mosu_board_rtc_write(const struct tm *utc);
+bool mosu_board_rtc_valid(void);
+
+esp_err_t mosu_board_imu_init(void);
+esp_err_t mosu_board_imu_read(mosu_board_accel_t *out);
+
+esp_err_t mosu_board_audio_init(void);
+esp_err_t mosu_board_audio_play_wav(const char *path, uint8_t volume);
+esp_err_t mosu_board_audio_beep(uint16_t hz, uint16_t ms);
+/* Release the I2S clocks and the codec stream between announcements. */
+esp_err_t mosu_board_audio_idle(void);
+
+/* Allow the touch controller to wake the CPU from automatic light sleep. */
+esp_err_t mosu_board_enable_touch_wake(bool enable);
+
+#ifdef __cplusplus
+}
+#endif

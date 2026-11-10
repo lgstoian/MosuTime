@@ -1,0 +1,27 @@
+# Build output
+build/
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock
+*.bin
+*.elf
+*.map
+
+# Host builds
+build-host/
+sim/out/
+test/host/build/
+
+# Tool caches / generated audio
+tools/.cache/
+tools/piper-models/
+sd_card/voice/*.wav
+sd_card/logs/
+build.log
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

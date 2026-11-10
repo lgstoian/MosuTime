@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host:
+    name: Host tests and preview
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure and run the host tests
+        run: |
+          cmake -S test/host -B test/host/build -DCMAKE_BUILD_TYPE=Debug
+          cmake --build test/host/build --parallel
+          ./test/host/build/mosu_tests
+
+      - name: Render the watch face
+        run: |
+          cmake -S sim -B sim/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build sim/build --parallel
+          mkdir -p sim/out
+          ./sim/build/mosu_sim sim/out
+
+      - name: Check the voice generator
+        run: |
+          python tools/gen_voice.py --dry-run > clips.txt
+          test "$(grep -c '\.wav' clips.txt)" -eq 78
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: watch-face-preview
+          path: sim/out/*.bmp
+          if-no-files-found: error
+
+  firmware:
+    name: ESP-IDF build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build for ESP32-S3
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: "."

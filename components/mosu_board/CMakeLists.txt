@@ -1,0 +1,23 @@
+idf_component_register(
+    SRCS
+        "src/mosu_board.c"
+        "src/mosu_board_audio.c"
+        "src/mosu_board_display.c"
+        "src/mosu_board_i2c.c"
+        "src/mosu_board_storage.c"
+    INCLUDE_DIRS "include"
+    REQUIRES
+        driver
+        esp_lcd
+        esp_lcd_touch
+        esp_lcd_sh8601
+        esp_lcd_touch_ft5x06
+        esp_lvgl_port
+        lvgl
+        esp_codec_dev
+        fatfs
+        vfs
+        sdmmc
+        esp_timer
+        mosu_core
+)
