@@ -43,6 +43,7 @@ static bool s_lvgl_stopped;
 static esp_pm_lock_handle_t s_display_lock;
 
 static mosu_tap_t s_tap;
+static portMUX_TYPE s_tap_mux = portMUX_INITIALIZER_UNLOCKED;
 static mosu_wrist_t s_wrist;
 static mosu_wrist_cfg_t s_wrist_cfg;
 
@@ -82,14 +83,27 @@ static esp_log_level_t log_level_for(uint8_t level)
 
 /*
  * LVGL reports the raw edges; the double tap detector decides whether the
- * watch should speak.  Only the LVGL task touches s_tap.
+ * watch should speak.  The callback runs in the LVGL task even while the face
+ * is off, so s_tap is shared with the app task: guard it with a spinlock.
  *
  * The touch interrupt itself belongs to esp_lvgl_port: it registers the ISR
  * on the INT pin and puts the input device in event mode.  We must not add a
- * second handler on that pin.  A touch therefore still reaches this callback
- * while the screen is off (the LVGL task runs, only its timers are stopped),
- * and s_touch_seen is what wakes the face.
+ * second handler on that pin.
  */
+static void tap_reset(void)
+{
+    mosu_tap_cfg_t cfg = {
+        .double_tap_ms = s_cfg.announce.double_tap_ms,
+        .max_hold_ms = s_cfg.announce.max_hold_ms,
+        .max_move_px = s_cfg.announce.max_move_px,
+        .cooldown_ms = s_cfg.announce.cooldown_ms,
+    };
+
+    taskENTER_CRITICAL(&s_tap_mux);
+    mosu_tap_init(&s_tap, &cfg);
+    taskEXIT_CRITICAL(&s_tap_mux);
+}
+
 static void on_touch(bool pressed, int16_t x, int16_t y, void *user)
 {
     (void)user;
@@ -104,7 +118,12 @@ static void on_touch(bool pressed, int16_t x, int16_t y, void *user)
         .y = y,
         .t_ms = stamp,
     };
-    if (mosu_tap_update(&s_tap, &sample)) {
+
+    taskENTER_CRITICAL(&s_tap_mux);
+    bool fired = mosu_tap_update(&s_tap, &sample);
+    taskEXIT_CRITICAL(&s_tap_mux);
+
+    if (fired) {
         s_say_requested = true;
     }
 }
@@ -212,12 +231,7 @@ static void screen_off(void)
     }
 
     s_screen_on = false;
-    mosu_tap_init(&s_tap, &(mosu_tap_cfg_t){
-                               .double_tap_ms = s_cfg.announce.double_tap_ms,
-                               .max_hold_ms = s_cfg.announce.max_hold_ms,
-                               .max_move_px = s_cfg.announce.max_move_px,
-                               .cooldown_ms = s_cfg.announce.cooldown_ms,
-                           });
+    tap_reset();
     mosu_wrist_reset(&s_wrist);
     s_touch_seen = false;
 
@@ -324,12 +338,7 @@ void app_main(void)
         (uint16_t)(s_cfg.display.motion_angle_deg * 1000u);
     s_wrist_cfg.refractory_ms = s_cfg.display.motion_refractory_ms;
     mosu_wrist_init(&s_wrist);
-    mosu_tap_init(&s_tap, &(mosu_tap_cfg_t){
-                               .double_tap_ms = s_cfg.announce.double_tap_ms,
-                               .max_hold_ms = s_cfg.announce.max_hold_ms,
-                               .max_move_px = s_cfg.announce.max_move_px,
-                               .cooldown_ms = s_cfg.announce.cooldown_ms,
-                           });
+    tap_reset();
 
     esp_pm_config_t pm_cfg = {
         .max_freq_mhz = 160,
