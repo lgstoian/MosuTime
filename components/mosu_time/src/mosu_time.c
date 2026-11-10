@@ -193,10 +193,17 @@ esp_err_t mosu_time_init(const mosu_config_t *cfg)
     char stored[MOSU_CFG_TZ_MAX];
 
     bool auto_tz = cfg ? cfg->clock.auto_timezone : false;
+    bool zone_ok = false;
     if (auto_tz && mosu_config_store_load_timezone(stored, sizeof(stored))) {
-        set_zone(stored, false);
-    } else {
-        set_zone(configured, false);
+        zone_ok = set_zone(stored, false);
+    }
+    if (!zone_ok) {
+        zone_ok = set_zone(configured, false);
+    }
+    if (!zone_ok) {
+        /* Never leave newlib without a zone: localtime would silently return
+         * UTC and the watch would show the wrong hour. */
+        set_zone("UTC0", false);
     }
 
     struct tm utc;

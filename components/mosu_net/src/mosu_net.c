@@ -272,11 +272,17 @@ static void net_task(void *arg)
             s_next_sync_s = uptime_s() + (uint32_t)s_cfg->clock.sync_hours * 3600u;
         }
 
-        uint32_t wait_ms = 5000;
-        if (s_cfg->clock.wifi_always_on) {
-            wait_ms = 5000;
+        uint32_t wait_s = 60;
+        if ((int32_t)(s_next_sync_s - now) > 0) {
+            uint32_t until = s_next_sync_s - now;
+            if (until < wait_s) {
+                wait_s = until;
+            }
         }
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(wait_ms));
+
+        /* Wake for a console sync request immediately; otherwise sleep in
+         * one-minute steps so the radio task costs almost nothing. */
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(wait_s * 1000u + 100u));
     }
 }
 

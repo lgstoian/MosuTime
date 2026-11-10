@@ -155,7 +155,8 @@ successful one, and red (with a slash) when the last attempt failed.
 While the screen is off:
 
 * the panel is switched off with its own command and the brightness is zeroed;
-* the LVGL task is stopped;
+* LVGL's tick timer is stopped, so nothing renders and the touch panel is not
+  polled;
 * the CPU enters automatic light sleep between accelerometer samples;
 * the IMU is sampled at `motion_poll_hz` (default 8 Hz) and the touch
   controller's interrupt line is a GPIO wake source;

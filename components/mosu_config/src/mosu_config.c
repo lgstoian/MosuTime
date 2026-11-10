@@ -731,6 +731,10 @@ void mosu_config_sanitize(mosu_config_t *cfg)
     if (cfg->clock.sync_hours > 168) {
         cfg->clock.sync_hours = 168;
     }
+    if (!mosu_config_timezone_ok(cfg->clock.timezone)) {
+        copy_str(cfg->clock.timezone, sizeof(cfg->clock.timezone),
+                 "EET-2EEST,M3.5.0/3,M10.5.0/4");
+    }
 
     if (cfg->announce.volume > 100) {
         cfg->announce.volume = 100;

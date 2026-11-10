@@ -81,8 +81,9 @@ off while audio is playing or while the glass is being touched.
 
 `screen_on` restores the configured brightness (switching an AMOLED panel off
 sets brightness to zero), takes the `NO_LIGHT_SLEEP` lock, forces a full
-repaint and resumes LVGL. `screen_off` stops the LVGL task first, then switches
-the panel off, then releases the lock, so no transfer is ever cut in half.
+repaint and restarts the LVGL tick timer. `screen_off` stops the LVGL tick
+timer first, then switches the panel off, then releases the lock, so no
+transfer is ever cut in half.
 
 ## Time
 

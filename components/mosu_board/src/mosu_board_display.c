@@ -135,7 +135,10 @@ esp_err_t mosu_board_display_start(void)
     const lvgl_port_display_cfg_t disp_cfg = {
         .io_handle = s_io,
         .panel_handle = s_panel,
-        .buffer_size = MOSU_LCD_H_RES * 100,
+        /* Two 50-line buffers in internal DMA memory: the QSPI driver can
+         * stream from them directly, and 82 KB is affordable next to Wi-Fi
+         * and the TLS session used for the timezone lookup. */
+        .buffer_size = MOSU_LCD_H_RES * 50,
         .double_buffer = true,
         .hres = MOSU_LCD_H_RES,
         .vres = MOSU_LCD_V_RES,
@@ -147,8 +150,8 @@ esp_err_t mosu_board_display_start(void)
             .mirror_y = false,
         },
         .flags = {
-            .buff_dma = false,
-            .buff_spiram = true,
+            .buff_dma = true,
+            .buff_spiram = false,
             .swap_bytes = true,
         },
     };

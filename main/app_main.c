@@ -40,6 +40,7 @@ static mosu_config_t s_cfg;
 static bool s_have_ui;
 static bool s_display_ok;
 static volatile bool s_screen_on;
+static bool s_lvgl_stopped;
 
 static esp_pm_lock_handle_t s_display_lock;
 
@@ -213,7 +214,10 @@ static void screen_on(bool via_touch)
         update_battery(true);
         update_wifi_icon();
         mosu_ui_refresh();
-        lvgl_port_resume();
+        if (s_lvgl_stopped) {
+            lvgl_port_resume();
+            s_lvgl_stopped = false;
+        }
     }
 
     s_screen_on = true;
@@ -230,6 +234,7 @@ static void screen_off(void)
 
     if (s_have_ui) {
         lvgl_port_stop();
+        s_lvgl_stopped = true;
     }
     if (s_display_ok) {
         mosu_board_display_off();
