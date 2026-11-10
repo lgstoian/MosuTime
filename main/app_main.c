@@ -11,14 +11,12 @@
 #include <stdbool.h>
 #include <string.h>
 
-#include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "esp_pm.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
 
@@ -44,13 +42,12 @@ static bool s_lvgl_stopped;
 
 static esp_pm_lock_handle_t s_display_lock;
 
-static SemaphoreHandle_t s_touch_event;
-
 static mosu_tap_t s_tap;
 static mosu_wrist_t s_wrist;
 static mosu_wrist_cfg_t s_wrist_cfg;
 
 static volatile bool s_say_requested;
+static volatile bool s_touch_seen;
 static volatile uint32_t s_last_activity_ms;
 
 static uint8_t s_battery_shown;
@@ -83,46 +80,15 @@ static esp_log_level_t log_level_for(uint8_t level)
 
 /* -------------------------------------------------------------------- touch */
 
-static void IRAM_ATTR touch_isr(void *arg)
-{
-    (void)arg;
-    BaseType_t woken = pdFALSE;
-    xSemaphoreGiveFromISR(s_touch_event, &woken);
-    if (woken == pdTRUE) {
-        portYIELD_FROM_ISR();
-    }
-}
-
-static void start_touch_interrupt(void)
-{
-    s_touch_event = xSemaphoreCreateBinary();
-    if (!s_touch_event) {
-        return;
-    }
-
-    esp_err_t err = gpio_install_isr_service(0);
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        ESP_LOGW(TAG, "GPIO ISR service: %s", esp_err_to_name(err));
-        return;
-    }
-
-    gpio_config_t cfg = {
-        .pin_bit_mask = 1ULL << MOSU_PIN_TOUCH_INT,
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_NEGEDGE,
-    };
-    if (gpio_config(&cfg) != ESP_OK) {
-        ESP_LOGW(TAG, "touch interrupt configuration failed");
-        return;
-    }
-    gpio_isr_handler_add(MOSU_PIN_TOUCH_INT, touch_isr, NULL);
-}
-
 /*
  * LVGL reports the raw edges; the double tap detector decides whether the
  * watch should speak.  Only the LVGL task touches s_tap.
+ *
+ * The touch interrupt itself belongs to esp_lvgl_port: it registers the ISR
+ * on the INT pin and puts the input device in event mode.  We must not add a
+ * second handler on that pin.  A touch therefore still reaches this callback
+ * while the screen is off (the LVGL task runs, only its timers are stopped),
+ * and s_touch_seen is what wakes the face.
  */
 static void on_touch(bool pressed, int16_t x, int16_t y, void *user)
 {
@@ -130,6 +96,7 @@ static void on_touch(bool pressed, int16_t x, int16_t y, void *user)
 
     uint32_t stamp = now_ms();
     s_last_activity_ms = stamp;
+    s_touch_seen = true;
 
     mosu_touch_sample_t sample = {
         .pressed = pressed,
@@ -222,21 +189,7 @@ static void screen_on(bool via_touch)
 
     s_screen_on = true;
     s_last_activity_ms = now_ms();
-
-    if (via_touch) {
-        /* LVGL is not running yet, so it cannot see the tap that woke the
-         * watch.  Count that tap here (zero movement, zero hold) so a second
-         * tap within the window is enough to ask for the time. */
-        mosu_touch_sample_t sample = {
-            .pressed = true,
-            .x = MOSU_LCD_W / 2,
-            .y = MOSU_LCD_H / 2,
-            .t_ms = s_last_activity_ms,
-        };
-        mosu_tap_update(&s_tap, &sample);
-        sample.pressed = false;
-        mosu_tap_update(&s_tap, &sample);
-    }
+    s_touch_seen = false;
 
     ESP_LOGD(TAG, "screen on (%s)", via_touch ? "touch" : "motion");
 }
@@ -266,10 +219,8 @@ static void screen_off(void)
                                .cooldown_ms = s_cfg.announce.cooldown_ms,
                            });
     mosu_wrist_reset(&s_wrist);
+    s_touch_seen = false;
 
-    if (s_touch_event) {
-        xSemaphoreTake(s_touch_event, 0);
-    }
     ESP_LOGD(TAG, "screen off");
 }
 
@@ -420,7 +371,6 @@ void app_main(void)
     }
     mosu_audio_start(&s_cfg);
 
-    start_touch_interrupt();
     mosu_board_enable_touch_wake(s_cfg.display.wake_on_touch);
 
     mosu_net_start(&s_cfg);
@@ -486,16 +436,10 @@ void app_main(void)
             poll_ms = 50u;
         }
 
-        bool touch_woke = false;
-        if (s_touch_event) {
-            touch_woke = xSemaphoreTake(s_touch_event, pdMS_TO_TICKS(poll_ms)) ==
-                         pdTRUE;
-        } else {
-            vTaskDelay(pdMS_TO_TICKS(poll_ms));
-        }
+        vTaskDelay(pdMS_TO_TICKS(poll_ms));
 
         if (s_cfg.display.wake_on_touch &&
-            (touch_woke || mosu_board_touch_active())) {
+            (s_touch_seen || mosu_board_touch_active())) {
             screen_on(true);
             continue;
         }
