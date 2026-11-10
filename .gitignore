@@ -11,13 +11,18 @@ dependencies.lock
 # Host builds
 build-host/
 build-emu/
+build-*/
 sim/out/
 test/host/build/
 
-# Emulator captures
+# Emulator capture and smoke artefacts
 emu-*.jsonl
 emu-*.log
 emu-*.png
+tools/emu/*.jsonl
+tools/emu/*.log
+tools/emu/_*.py
+tools/emu/*/target/
 tools/emu/panel/target/
 
 # Tool caches / generated audio

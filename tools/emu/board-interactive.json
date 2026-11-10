@@ -1,0 +1,72 @@
+{
+  "parts": {
+    "panel": {
+      "module": "panel/target/wasm32-unknown-unknown/release/mosu_panel.wasm",
+      "pins": {
+        "CS": 12,
+        "SCK": 11,
+        "D0": 4,
+        "D1": 5,
+        "D2": 6,
+        "D3": 7
+      }
+    },
+    "touch": {
+      "module": "touch/target/wasm32-unknown-unknown/release/mosu_touch.wasm",
+      "pins": {
+        "SCL": 14,
+        "SDA": 15,
+        "INT": 38
+      },
+      "addr": "0x38"
+    },
+    "imu": {
+      "module": "imu/target/wasm32-unknown-unknown/release/mosu_imu.wasm",
+      "pins": {
+        "SCL": 14,
+        "SDA": 15
+      },
+      "addr": "0x6A"
+    },
+    "chips": {
+      "module": "chips/target/wasm32-unknown-unknown/release/mosu_chips.wasm",
+      "pins": {
+        "SCL": 14,
+        "SDA": 15
+      }
+    }
+  },
+  "devices": {
+    "pmu": {
+      "type": "regfile",
+      "i2c": 0,
+      "addr": "0x34",
+      "regs": {
+        "0x00": "0x28",
+        "0x01": "0x00",
+        "0x34": "0x0F",
+        "0x35": "0x3C"
+      }
+    },
+    "rtc": {
+      "type": "regfile",
+      "i2c": 0,
+      "addr": "0x51",
+      "regs": {
+        "0x02": "0x00",
+        "0x03": "0x41",
+        "0x04": "0x07",
+        "0x05": "0x10",
+        "0x06": "0x02",
+        "0x07": "0x11",
+        "0x08": "0x26"
+      }
+    },
+    "codec": {
+      "type": "regfile",
+      "i2c": 0,
+      "addr": "0x18",
+      "fill": "0x00"
+    }
+  }
+}

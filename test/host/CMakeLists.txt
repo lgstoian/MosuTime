@@ -8,6 +8,8 @@ set(ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 
 add_executable(mosu_tests
     test_core.c
+    test_session.c
+    test_config.c
     ${ROOT}/components/mosu_core/src/mosu_battery.c
     ${ROOT}/components/mosu_core/src/mosu_digits.c
     ${ROOT}/components/mosu_core/src/mosu_phrase.c
@@ -15,11 +17,19 @@ add_executable(mosu_tests
     ${ROOT}/components/mosu_core/src/mosu_timefmt.c
     ${ROOT}/components/mosu_core/src/mosu_wrist.c
     ${ROOT}/components/mosu_config/src/mosu_config.c
+    ${ROOT}/components/mosu_session/src/mosu_session.c
 )
 
 target_include_directories(mosu_tests PRIVATE
     ${ROOT}/components/mosu_core/include
     ${ROOT}/components/mosu_config/include
+    ${ROOT}/components/mosu_session/include
+)
+
+# The config suite reads the shipped card image, whichever directory the
+# build happens to live in.
+target_compile_definitions(mosu_tests PRIVATE
+    MOSU_SOURCE_DIR="${ROOT}"
 )
 
 if(UNIX)

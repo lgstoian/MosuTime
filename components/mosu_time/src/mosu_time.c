@@ -20,7 +20,8 @@
 
 static const char *TAG = "mosu_time";
 
-static char s_tz[MOSU_CFG_TZ_MAX];
+static char s_tz_buf[2][MOSU_CFG_TZ_MAX];
+static volatile char *s_tz = s_tz_buf[0];
 static bool s_valid;
 static bool s_have_sync;
 static time_t s_last_sync;
@@ -90,7 +91,7 @@ static const tz_map_t s_tz_map[] = {
 
 const char *mosu_time_timezone(void)
 {
-    return s_tz;
+    return (const char *)s_tz;
 }
 
 static const char *posix_for_zone(const char *tz)
@@ -141,8 +142,12 @@ static bool set_zone(const char *tz, bool persist){
     }
     tzset();
 
-    snprintf(s_tz, sizeof(s_tz), "%s", tz);
-    ESP_LOGI(TAG, "timezone: %s (%s)", tz, posix);
+    /* Double buffer: the network task writes the zone while the console and
+     * the UI may read it.  The pointer swap is atomic on the ESP32. */
+    char *next = (s_tz == s_tz_buf[0]) ? s_tz_buf[1] : s_tz_buf[0];
+    snprintf(next, sizeof(s_tz_buf[0]), "%s", tz);
+    s_tz = next;
+    ESP_LOGI(TAG, "timezone: %s (%s)", next, posix);
 
     if (persist) {
         mosu_config_store_save_timezone(tz);

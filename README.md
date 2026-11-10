@@ -132,12 +132,15 @@ python tools/gen_voice.py --out sd_card/voice
 ```
 
 The script downloads the voice into `tools/piper-models/`, renders all 78
-clips (12 hours, 59 minutes, 7 weekdays), and checks that each file is mono
-16-bit WAV. Nothing is embedded in the firmware, so the voice and the wording
-can be replaced by copying new files onto the card.
+clips (12 hours, 59 minutes, 7 weekdays), trims silence, normalises each clip
+to -3 dBFS, and checks that each file is mono 16-bit WAV. Nothing is embedded
+in the firmware, so the voice and the wording can be replaced by copying new
+files onto the card. A second script, `tools/check_voice.py`, verifies the
+whole set, and `--preview` writes one combined sentence for a family review.
 
 Romanian grammar is handled in `tools/gen_voice.py`: *un minut*, *două
-minute*, *douăzeci de minute*, *douăzeci și una de minute*.
+minute*, *douăzeci de minute*, *douăzeci și una de minute*. The full phrase
+list and the replacement procedure are in [`docs/voice.md`](docs/voice.md).
 
 ## Behaviour
 
@@ -169,10 +172,12 @@ When the screen is on, a `NO_LIGHT_SLEEP` power lock is held so the QSPI
 transfers are never interrupted. The CPU is capped at 160 MHz for the same
 reason - this is a clock, not a game console.
 
-Expect days of runtime from the shipped cell, and weeks if the watch is rarely
-looked at. The exact figure depends on the cell, the number of wrist raises and
-the sync interval; measure it with `idf.py monitor` and the `status` command
-before promising anything to the wearer.
+Expect days of runtime from the shipped cell - roughly 3-4 days at 300 mAh in
+the modelled duty cycle, longer with a bigger cell or fewer wakes. The exact
+figure depends on the cell, the touch controller, the wrist-raise rate and the
+sync interval. `tools/power_budget.py` shows the trade-offs, and
+[`docs/power.md`](docs/power.md) has the PPK2/USB-meter procedure and the
+measurement table to fill before promising anything to the wearer.
 
 ## Emulator
 
@@ -187,8 +192,8 @@ pictures at the top of this file are made that way.
 tools/emu/capture.sh
 ```
 
-The script boots the firmware three times (AM, PM with `settime`, unknown time)
-and checks that each run reaches "watch face ready". See
+The script boots the firmware four times (AM, PM with `settime`, unknown time,
+low battery) and checks that each run reaches "watch face ready". See
 [`tools/emu/README.md`](tools/emu/README.md) for the one-time setup and for
 what the emulator does and does not model. It also shows how to drive the
 console with `--inject-on`/`--inject`, which is how the phrase builder was
@@ -201,7 +206,7 @@ wrist detectors, seven-segment renderer) is shared by the firmware, the host
 tests and the simulator.
 
 ```sh
-# host tests (184 checks)
+# host tests (312 checks)
 cmake -S test/host -B test/host/build
 cmake --build test/host/build
 ./test/host/build/mosu_tests
@@ -220,6 +225,7 @@ PM, low battery with a failed sync, and the unknown-time state.
 ```
 components/
   mosu_core/    pure C: no ESP-IDF, shared with tests and simulator
+  mosu_session/ pure C: screen/tap/battery state machine
   mosu_config/  INI parser + NVS last-good cache
   mosu_board/   the only board-specific code
   mosu_time/    RTC, SNTP, IANA -> POSIX timezone table
@@ -230,7 +236,7 @@ components/
 main/           power state machine
 sim/            desktop preview
 test/host/      host tests
-tools/          voice generation, build helper
+tools/          voice generation, build helper, power model, contact sheet
 tools/emu/      esp-emu board, panel part, screenshot reconstruction
 ```
 
@@ -240,14 +246,25 @@ and into a BMP on a PC, so the family can approve the face on a laptop before
 anything is flashed.
 
 `docs/architecture.md` explains the data flow and what a port to another board
-has to provide.
+has to provide. The rest of the documentation:
+
+- [`docs/bringup.md`](docs/bringup.md) - first-hardware checklist
+- [`docs/power.md`](docs/power.md) - power states, estimates and measurement
+- [`docs/voice.md`](docs/voice.md) - phrases, grammar and regeneration
+- [`docs/maintenance.md`](docs/maintenance.md) - config, SD card, updates
+- [`docs/family-ro.md`](docs/family-ro.md) - the one-page guide for the family
+- [`docs/accessibility/README.md`](docs/accessibility/README.md) - print-size
+  and contrast checks
 
 ## Console
 
 The USB/UART console is for maintenance, not for the wearer:
 
 ```
-help status time sync say bright N vol N tap reboot
+help status time sync say settime bright N vol N tap reboot
+i2c pmu rtc imu pm heap tasks config
+test screen [colors|grid|corners|off] | test touch | test audio
+sd remount | power screen on|off | power wifi | power idle
 ```
 
 `bright` and `vol` change the value at runtime; edit `mosu.cfg` to make it

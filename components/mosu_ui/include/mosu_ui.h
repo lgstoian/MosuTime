@@ -24,6 +24,14 @@ typedef enum {
     MOSU_UI_WIFI_FAIL,     /* red: last sync failed */
 } mosu_ui_wifi_t;
 
+/* Bring-up patterns that replace the clock while the panel is being checked. */
+typedef enum {
+    MOSU_UI_TEST_NONE = 0, /* normal watch face */
+    MOSU_UI_TEST_COLORS,   /* red/green/blue/white/grey bands */
+    MOSU_UI_TEST_GRID,     /* white grid, 1 px every 50 px */
+    MOSU_UI_TEST_CORNERS,  /* corner squares and a centre cross */
+} mosu_ui_test_t;
+
 esp_err_t mosu_ui_create(const mosu_config_t *cfg);
 
 void mosu_ui_set_time(uint8_t hour24, uint8_t minute, bool valid);
@@ -42,6 +50,13 @@ void mosu_ui_set_touch_cb(mosu_ui_touch_cb_t cb, void *user);
 
 /* Force a full repaint; used every time the panel is switched back on. */
 void mosu_ui_refresh(void);
+
+/*
+ * Draw a bring-up pattern instead of the clock.  The patterns are absolute:
+ * the burn-in pixel shift is ignored so the edges of the glass and the panel
+ * offset can be judged by eye.  MOSU_UI_TEST_NONE brings the face back.
+ */
+void mosu_ui_test_pattern(mosu_ui_test_t pattern);
 
 #ifdef __cplusplus
 }

@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: 2026 Stoian Alexandru
+# SPDX-License-Identifier: MIT
+#
+# Reference style for NEW files only.
+#
+# This file is deliberately not enforced by CI: the existing tree predates it
+# and a whole-tree reformat would bury real changes in noise.  When you touch a
+# file, you may format it with `clang-format -i <file>`; new files should start
+# out in this style.
+
+BasedOnStyle: LLVM
+Language: Cpp
+
+# The firmware, host tests and simulator all use 4-space indentation.
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ContinuationIndentWidth: 4
+IndentCaseLabels: false
+
+# 80 columns keeps the three-way split editor honest on a laptop screen.
+ColumnLimit: 80
+
+# `if (x) {` on the same line, functions included.
+BreakBeforeBraces: Attach
+
+# Include order is semantic here (own header first, then project, then system);
+# never let the formatter reshuffle it.
+SortIncludes: Never

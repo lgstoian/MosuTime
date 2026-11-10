@@ -1,0 +1,30 @@
+# An FT3168 capacitive touch controller, built as a virtual part.
+#
+# The real chip sits at I2C address 0x38 on SCL/SDA and pulls INT low while a
+# finger is on the glass.  This part does the same, and answers the register
+# reads the esp_lcd_touch_ft5x06 driver makes: the point count at 0x02 and one
+# point's x/y at 0x03.
+#
+# Build (WSL or Linux, with a clone of esp-emulator checked out next to this
+# repository, as the panel part's README describes):
+#
+#   ESP_COSIM_PROTO_DIR=/mnt/d/Code/esp-emulator/proto \
+#     cargo build --release --target wasm32-unknown-unknown
+[workspace]
+
+[package]
+name = "mosu_touch"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+esp-part = { path = "../../../../esp-emulator/esp-part" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

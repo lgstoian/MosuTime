@@ -100,6 +100,25 @@ esp_err_t mosu_board_audio_idle(void);
 /* Allow the touch controller to wake the CPU from automatic light sleep. */
 esp_err_t mosu_board_enable_touch_wake(bool enable);
 
+/* ------------------------------------------------------------ diagnostics */
+/*
+ * Bring-up helpers for the console.  They only read state and print to
+ * stdout: a missing part must produce a line of text, never a failed boot.
+ */
+esp_err_t mosu_board_i2c_scan(void);
+void mosu_board_pmu_dump(void);
+void mosu_board_rtc_dump(void);
+void mosu_board_imu_dump(void);
+void mosu_board_pm_dump(void);
+void mosu_board_heap_dump(void);
+void mosu_board_tasks_dump(void);
+
+/* Three short beeps (440/880/1320 Hz) through the normal speaker path. */
+esp_err_t mosu_board_audio_test(void);
+
+/* Drop and mount the SD card again, waiting like the boot does. */
+esp_err_t mosu_board_sdcard_remount(void);
+
 #ifdef __cplusplus
 }
 #endif

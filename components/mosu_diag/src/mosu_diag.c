@@ -28,6 +28,9 @@
 static const char *TAG = "mosu_diag";
 static mosu_config_t *s_cfg;
 
+static mosu_diag_hooks_t s_hooks;
+static volatile bool s_touch_test;
+
 static void print_status(void)
 {
     mosu_net_status_t net;
@@ -54,6 +57,71 @@ static void print_status(void)
     printf("display: brightness %u%%\n", (unsigned)s_cfg->display.brightness);
 }
 
+/*
+ * Every value that shapes the watch, except the Wi-Fi passwords.  The console
+ * output ends up in issue reports and chat logs; a password must never be one
+ * of those lines, not even when it is short enough to read at a glance.
+ */
+static void print_config(void)
+{
+    const mosu_config_t *c = s_cfg;
+
+    printf("device : %s, log level %u\n", c->device.name,
+           (unsigned)c->device.log_level);
+
+    printf("display: brightness %u%%, screen on %u ms\n",
+           (unsigned)c->display.brightness,
+           (unsigned)c->display.screen_on_ms);
+    printf("display: wake touch %d, motion %d, angle %u deg, refractory %u ms\n",
+           (int)c->display.wake_on_touch, (int)c->display.wake_on_motion,
+           (unsigned)c->display.motion_angle_deg,
+           (unsigned)c->display.motion_refractory_ms);
+    printf("display: poll %u Hz, pixel shift %u s, tap feedback %u ms\n",
+           (unsigned)c->display.motion_poll_hz,
+           (unsigned)c->display.pixel_shift_sec,
+           (unsigned)c->display.tap_feedback_ms);
+
+    printf("status : battery green >= %u, orange >= %u, show %d, wifi %d, "
+           "slash %d\n",
+           (unsigned)c->status.battery_green_min,
+           (unsigned)c->status.battery_orange_min,
+           (int)c->status.show_battery, (int)c->status.show_wifi,
+           (int)c->status.wifi_fail_slash);
+
+    printf("colors : bg 0x%06X, time 0x%06X / 0x%06X\n",
+           (unsigned)c->colors.background, (unsigned)c->colors.time_am,
+           (unsigned)c->colors.time_pm);
+    printf("colors : battery 0x%06X / 0x%06X / 0x%06X\n",
+           (unsigned)c->colors.battery_green,
+           (unsigned)c->colors.battery_orange,
+           (unsigned)c->colors.battery_red);
+    printf("colors : wifi 0x%06X / 0x%06X / 0x%06X, tap 0x%06X\n",
+           (unsigned)c->colors.wifi_idle, (unsigned)c->colors.wifi_ok,
+           (unsigned)c->colors.wifi_fail, (unsigned)c->colors.tap_border);
+
+    printf("clock  : tz %s, auto %d, sync every %u h, wifi always %d\n",
+           c->clock.timezone, (int)c->clock.auto_timezone,
+           (unsigned)c->clock.sync_hours, (int)c->clock.wifi_always_on);
+    printf("clock  : ntp %s / %s\n", c->clock.ntp1, c->clock.ntp2);
+    printf("clock  : geo %s, manual '%s'\n", c->clock.geo_url,
+           c->clock.manual_time);
+
+    printf("speech : enabled %d, volume %u%%, day %d, gap %u ms\n",
+           (int)c->announce.enabled, (unsigned)c->announce.volume,
+           (int)c->announce.announce_day, (unsigned)c->announce.clip_gap_ms);
+    printf("speech : double tap %u ms, hold %u ms, move %u px, cooldown %u ms\n",
+           (unsigned)c->announce.double_tap_ms,
+           (unsigned)c->announce.max_hold_ms,
+           (unsigned)c->announce.max_move_px,
+           (unsigned)c->announce.cooldown_ms);
+    printf("speech : clips in %s\n", c->announce.voice_dir);
+
+    printf("wifi   : %u network(s)\n", (unsigned)c->wifi_count);
+    for (uint8_t i = 0; i < c->wifi_count && i < MOSU_CFG_WIFI_MAX; i++) {
+        printf("       %u: %s\n", (unsigned)(i + 1), c->wifi[i].ssid);
+    }
+}
+
 static void say_now(void)
 {
     struct tm now;
@@ -72,6 +140,41 @@ static void say_now(void)
     printf("speaking %u clip(s)\n", (unsigned)phrase.count);
 }
 
+static mosu_ui_test_t parse_pattern(const char *name)
+{
+    if (!strcmp(name, "colors")) {
+        return MOSU_UI_TEST_COLORS;
+    }
+    if (!strcmp(name, "grid")) {
+        return MOSU_UI_TEST_GRID;
+    }
+    if (!strcmp(name, "corners")) {
+        return MOSU_UI_TEST_CORNERS;
+    }
+    if (!strcmp(name, "off")) {
+        return MOSU_UI_TEST_NONE;
+    }
+    return (mosu_ui_test_t)-1;
+}
+
+static void test_screen(const char *name)
+{
+    mosu_ui_test_t pattern = parse_pattern(name);
+    if ((int)pattern < 0) {
+        printf("usage: test screen [colors|grid|corners|off]\n");
+        return;
+    }
+
+    printf("test screen: %s\n", name);
+    /* app_main owns the panel state: going through the hook keeps the pattern
+     * from being drawn on a sleeping display. */
+    if (s_hooks.test_pattern) {
+        s_hooks.test_pattern((int)pattern);
+    } else {
+        mosu_ui_test_pattern(pattern);
+    }
+}
+
 static void handle_line(char *line)
 {
     while (*line && isspace((unsigned char)*line)) {
@@ -82,7 +185,12 @@ static void handle_line(char *line)
     }
 
     if (!strcmp(line, "help") || !strcmp(line, "?")) {
-        printf("commands: help status time sync say settime bright vol tap reboot\n");
+        printf("commands:\n");
+        printf("  status time sync say settime bright vol tap reboot\n");
+        printf("  i2c pmu rtc imu pm heap tasks config\n");
+        printf("  test screen [colors|grid|corners|off]\n");
+        printf("  test touch | test audio | sd remount\n");
+        printf("  power screen on|off | power wifi | power idle\n");
     } else if (!strcmp(line, "status")) {
         print_status();
     } else if (!strcmp(line, "time")) {
@@ -146,6 +254,69 @@ static void handle_line(char *line)
         s_cfg->announce.volume = (uint8_t)value;
         mosu_audio_set_volume((uint8_t)value);
         printf("volume %d%% (runtime only)\n", value);
+    } else if (!strcmp(line, "i2c")) {
+        esp_err_t err = mosu_board_i2c_scan();
+        if (err != ESP_OK) {
+            printf("i2c : scan error %s\n", esp_err_to_name(err));
+        }
+    } else if (!strcmp(line, "pmu")) {
+        mosu_board_pmu_dump();
+    } else if (!strcmp(line, "rtc")) {
+        mosu_board_rtc_dump();
+    } else if (!strcmp(line, "imu")) {
+        mosu_board_imu_dump();
+    } else if (!strcmp(line, "pm")) {
+        mosu_board_pm_dump();
+    } else if (!strcmp(line, "heap")) {
+        mosu_board_heap_dump();
+    } else if (!strcmp(line, "tasks")) {
+        mosu_board_tasks_dump();
+    } else if (!strcmp(line, "config")) {
+        print_config();
+    } else if (!strcmp(line, "test screen")) {
+        printf("usage: test screen [colors|grid|corners|off]\n");
+    } else if (!strncmp(line, "test screen ", 12)) {
+        test_screen(line + 12);
+    } else if (!strcmp(line, "test touch")) {
+        s_touch_test = !s_touch_test;
+        printf("touch test %s\n",
+               s_touch_test ? "on: touch edges will be logged"
+                            : "off");
+    } else if (!strcmp(line, "test audio")) {
+        esp_err_t err = mosu_board_audio_test();
+        printf("audio test: %s\n", esp_err_to_name(err));
+    } else if (!strcmp(line, "sd remount")) {
+        esp_err_t err = mosu_board_sdcard_remount();
+        printf("sd remount: %s, %s\n", esp_err_to_name(err),
+               mosu_board_sdcard_ready() ? "mounted" : "not mounted");
+    } else if (!strcmp(line, "power screen on")) {
+        if (!s_hooks.screen_on) {
+            printf("no screen on hook\n");
+            return;
+        }
+        s_hooks.screen_on();
+        printf("screen on\n");
+    } else if (!strcmp(line, "power screen off")) {
+        if (!s_hooks.screen_off) {
+            printf("no screen off hook\n");
+            return;
+        }
+        s_hooks.screen_off();
+        printf("screen off\n");
+    } else if (!strcmp(line, "power wifi")) {
+        if (!s_hooks.power_wifi) {
+            printf("no wifi power hook\n");
+            return;
+        }
+        s_hooks.power_wifi();
+        printf("wifi power requested\n");
+    } else if (!strcmp(line, "power idle")) {
+        if (!s_hooks.power_idle) {
+            printf("no idle power hook\n");
+            return;
+        }
+        s_hooks.power_idle();
+        printf("idle power requested\n");
     } else if (!strcmp(line, "reboot")) {
         printf("rebooting\n");
         fflush(stdout);
@@ -197,4 +368,18 @@ esp_err_t mosu_diag_start(mosu_config_t *cfg)
     }
     ESP_LOGI(TAG, "console started");
     return ESP_OK;
+}
+
+void mosu_diag_set_hooks(const mosu_diag_hooks_t *hooks)
+{
+    if (hooks) {
+        s_hooks = *hooks;
+    } else {
+        memset(&s_hooks, 0, sizeof(s_hooks));
+    }
+}
+
+bool mosu_diag_touch_test_active(void)
+{
+    return s_touch_test;
 }

@@ -12,6 +12,12 @@
  *
  * Usage:
  *   mosu_sim [output-directory]
+ *   mosu_sim --render <out.bmp> <hour24> <minute> <battery> <wifi 0|1|2> \
+ *            <slash 0|1> <valid 0|1>
+ *
+ * The default mode writes the four preview scenes used by CI.  The --render
+ * mode writes exactly one scene, which tools/contact_sheet.py uses to build
+ * the accessibility contact sheet.
  */
 #include <math.h>
 #include <stdint.h>
@@ -289,8 +295,78 @@ static void write_bmp(const char *path, const image_t *img)
     printf("wrote %s\n", path);
 }
 
+static void print_usage(const char *argv0)
+{
+    fprintf(stderr, "usage:\n");
+    fprintf(stderr, "  %s [output-directory]\n", argv0);
+    fprintf(stderr,
+            "  %s --render <out.bmp> <hour24> <minute> <battery> "
+            "<wifi 0|1|2> <slash 0|1> <valid 0|1>\n",
+            argv0);
+}
+
+static bool parse_int(const char *text, int min, int max, int *out)
+{
+    char *end = NULL;
+    long value = strtol(text, &end, 10);
+
+    if (end == text || *end != '\0' || value < min || value > max) {
+        return false;
+    }
+    *out = (int)value;
+    return true;
+}
+
+/* One scene from explicit arguments: used by tools/contact_sheet.py. */
+static int render_one(int argc, char **argv)
+{
+    if (argc != 9) {
+        print_usage(argv[0]);
+        return 2;
+    }
+
+    const char *out_path = argv[2];
+    int hour24 = 0;
+    int minute = 0;
+    int battery = 0;
+    int wifi = 0;
+    int slash = 0;
+    int valid = 0;
+
+    if (!parse_int(argv[3], 0, 23, &hour24) ||
+        !parse_int(argv[4], 0, 59, &minute) ||
+        !parse_int(argv[5], 0, 100, &battery) ||
+        !parse_int(argv[6], 0, 2, &wifi) ||
+        !parse_int(argv[7], 0, 1, &slash) ||
+        !parse_int(argv[8], 0, 1, &valid)) {
+        fprintf(stderr, "mosu_sim: invalid scene argument\n");
+        print_usage(argv[0]);
+        return 2;
+    }
+
+    image_t img = {
+        .pixels = malloc((size_t)MOSU_LCD_W * MOSU_LCD_H * 3),
+        .width = MOSU_LCD_W,
+        .height = MOSU_LCD_H,
+    };
+    if (!img.pixels) {
+        return 1;
+    }
+
+    render_scene(&img, hour24 >= 12, valid != 0, (uint8_t)hour24,
+                 (uint8_t)minute, battery, (wifi_state_t)wifi, slash != 0);
+    write_bmp(out_path, &img);
+
+    free(img.pixels);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
+    if (argc > 1 && strcmp(argv[1], "--render") == 0) {
+        return render_one(argc, argv);
+    }
+
     const char *out_dir = argc > 1 ? argv[1] : "out";
 
     image_t img = {

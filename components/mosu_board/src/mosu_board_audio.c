@@ -202,6 +202,48 @@ static esp_err_t open_stream(uint32_t sample_rate)
     return esp_codec_dev_open(s_codec, &fs);
 }
 
+/* The stream must already be open; both helpers are shared by beep() and the
+ * console's audio test so the tone path has a single implementation. */
+static void write_tone(uint16_t hz, uint16_t ms)
+{
+    int16_t buffer[512];
+    const int total = (AUDIO_SAMPLE_RATE * ms) / 1000;
+    int done = 0;
+    float phase = 0.0f;
+    const float step =
+        (2.0f * 3.14159265f * (float)hz) / (float)AUDIO_SAMPLE_RATE;
+
+    while (done < total) {
+        int n = total - done;
+        if (n > (int)(sizeof(buffer) / sizeof(buffer[0]))) {
+            n = (int)(sizeof(buffer) / sizeof(buffer[0]));
+        }
+        for (int i = 0; i < n; i++) {
+            buffer[i] = (int16_t)(sinf(phase) * 8000.0f);
+            phase += step;
+            if (phase > 6.2831853f) {
+                phase -= 6.2831853f;
+            }
+        }
+        esp_codec_dev_write(s_codec, buffer, n * (int)sizeof(int16_t));
+        done += n;
+    }
+}
+
+static void write_silence(uint16_t ms)
+{
+    int16_t buffer[256] = {0};
+    int total = (AUDIO_SAMPLE_RATE * ms) / 1000;
+
+    while (total > 0) {
+        int n = total < (int)(sizeof(buffer) / sizeof(buffer[0]))
+                    ? total
+                    : (int)(sizeof(buffer) / sizeof(buffer[0]));
+        esp_codec_dev_write(s_codec, buffer, n * (int)sizeof(int16_t));
+        total -= n;
+    }
+}
+
 esp_err_t mosu_board_audio_idle(void)
 {
     if (!s_codec) {
@@ -289,32 +331,32 @@ esp_err_t mosu_board_audio_beep(uint16_t hz, uint16_t ms)
         return err;
     }
 
-    int16_t buffer[512];
-    const int total = (AUDIO_SAMPLE_RATE * ms) / 1000;
-    int done = 0;
-    float phase = 0.0f;
-    float step = (2.0f * 3.14159265f * (float)hz) / (float)AUDIO_SAMPLE_RATE;
+    write_tone(hz, ms);
+    return mosu_board_audio_idle();
+}
 
-    while (done < total) {
-        int n = total - done;
-        if (n > (int)(sizeof(buffer) / sizeof(buffer[0]))) {
-            n = (int)(sizeof(buffer) / sizeof(buffer[0]));
-        }
-        for (int i = 0; i < n; i++) {
-            buffer[i] = (int16_t)(sinf(phase) * 8000.0f);
-            phase += step;
-            if (phase > 6.2831853f) {
-                phase -= 6.2831853f;
-            }
-        }
-        esp_codec_dev_write(s_codec, buffer, n * (int)sizeof(int16_t));
-        done += n;
+esp_err_t mosu_board_audio_test(void)
+{
+    if (!s_codec) {
+        return ESP_ERR_INVALID_STATE;
     }
 
-    esp_codec_dev_close(s_codec);
-    if (s_tx && s_channel_enabled) {
-        i2s_channel_disable(s_tx);
-        s_channel_enabled = false;
+    /* A fixed, audible volume: the test must be heard even when the config
+     * volume is zero or the wearer muted the announcements. */
+    esp_codec_dev_set_out_vol(s_codec, 70);
+
+    esp_err_t err = open_stream(AUDIO_SAMPLE_RATE);
+    if (err != ESP_OK) {
+        return err;
     }
-    return ESP_OK;
+
+    static const uint16_t tones[] = {440, 880, 1320};
+    for (size_t i = 0; i < sizeof(tones) / sizeof(tones[0]); i++) {
+        if (i > 0) {
+            write_silence(60);
+        }
+        write_tone(tones[i], 120);
+    }
+
+    return mosu_board_audio_idle();
 }

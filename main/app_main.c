@@ -28,8 +28,20 @@
 #include "mosu_core/mosu_layout.h"
 #include "mosu_diag.h"
 #include "mosu_net.h"
+#include "mosu_session.h"
 #include "mosu_time.h"
 #include "mosu_ui.h"
+
+_Static_assert((int)MOSU_SESSION_WIFI_IDLE == (int)MOSU_UI_WIFI_IDLE &&
+                   (int)MOSU_SESSION_WIFI_OK == (int)MOSU_UI_WIFI_OK &&
+                   (int)MOSU_SESSION_WIFI_FAIL == (int)MOSU_UI_WIFI_FAIL,
+               "session and UI Wi-Fi enums must match");
+_Static_assert((int)MOSU_SESSION_NET_IDLE == (int)MOSU_NET_IDLE &&
+                   (int)MOSU_SESSION_NET_CONNECTING ==
+                       (int)MOSU_NET_CONNECTING &&
+                   (int)MOSU_SESSION_NET_CONNECTED == (int)MOSU_NET_CONNECTED &&
+                   (int)MOSU_SESSION_NET_FAILED == (int)MOSU_NET_FAILED,
+               "session and net state enums must match");
 
 static const char *TAG = "mosu";
 
@@ -37,22 +49,14 @@ static mosu_config_t s_cfg;
 
 static bool s_have_ui;
 static bool s_display_ok;
-static volatile bool s_screen_on;
 static bool s_lvgl_stopped;
 
 static esp_pm_lock_handle_t s_display_lock;
 
-static mosu_tap_t s_tap;
-static portMUX_TYPE s_tap_mux = portMUX_INITIALIZER_UNLOCKED;
+static mosu_session_t s_session;
+static portMUX_TYPE s_session_mux = portMUX_INITIALIZER_UNLOCKED;
 static mosu_wrist_t s_wrist;
 static mosu_wrist_cfg_t s_wrist_cfg;
-
-static volatile bool s_say_requested;
-static volatile bool s_touch_seen;
-static volatile uint32_t s_last_activity_ms;
-
-static uint8_t s_battery_shown;
-static bool s_battery_have;
 
 static uint32_t now_ms(void)
 {
@@ -85,51 +89,30 @@ static esp_log_level_t log_level_for(uint8_t level)
  * The touch interrupt belongs to esp_lvgl_port: it registers the ISR on the
  * INT pin and puts the input device in event mode.  We must not add a second
  * handler on that pin.
- */
-
-/* Reset the double tap detector, safely against a touch callback. */
-static void tap_reset(void)
-{
-    mosu_tap_cfg_t cfg = {
-        .double_tap_ms = s_cfg.announce.double_tap_ms,
-        .max_hold_ms = s_cfg.announce.max_hold_ms,
-        .max_move_px = s_cfg.announce.max_move_px,
-        .cooldown_ms = s_cfg.announce.cooldown_ms,
-    };
-
-    taskENTER_CRITICAL(&s_tap_mux);
-    mosu_tap_init(&s_tap, &cfg);
-    taskEXIT_CRITICAL(&s_tap_mux);
-}
-
-/*
- * LVGL reports the raw edges; the double tap detector decides whether the
- * watch should speak.  The callback runs in the LVGL task even while the face
- * is off (only the LVGL timers are stopped), so s_tap is shared with the app
- * task and guarded by s_tap_mux.
+ *
+ * LVGL reports the raw edges; mosu_session owns the double tap detector and
+ * the wake request.  The callback runs in the LVGL task even while the face is
+ * off (only the LVGL timers are stopped), so the session is shared with the
+ * app task and guarded by s_session_mux.
  */
 static void on_touch(bool pressed, int16_t x, int16_t y, void *user)
 {
     (void)user;
 
-    uint32_t stamp = now_ms();
-    s_last_activity_ms = stamp;
-    s_touch_seen = true;
-
     mosu_touch_sample_t sample = {
         .pressed = pressed,
         .x = x,
         .y = y,
-        .t_ms = stamp,
+        .t_ms = now_ms(),
     };
 
-    taskENTER_CRITICAL(&s_tap_mux);
-    bool fired = mosu_tap_update(&s_tap, &sample);
-    taskEXIT_CRITICAL(&s_tap_mux);
-
-    if (fired) {
-        s_say_requested = true;
+    if (mosu_diag_touch_test_active()) {
+        ESP_LOGI(TAG, "touch %s x=%d y=%d", pressed ? "down" : "up", x, y);
     }
+
+    taskENTER_CRITICAL(&s_session_mux);
+    mosu_session_touch(&s_session, &sample);
+    taskEXIT_CRITICAL(&s_session_mux);
 }
 
 /* ------------------------------------------------------------------ display */
@@ -149,22 +132,9 @@ static void update_battery(bool immediate)
         return;
     }
 
-    if (!pmu.battery_present) {
-        s_battery_have = false;
-        mosu_ui_set_battery(0, false);
-        return;
-    }
-
-    if (!s_battery_have || immediate) {
-        s_battery_shown = pmu.percent;
-        s_battery_have = true;
-    } else {
-        /* Smooth the ADC noise so the colour does not flicker at a
-         * threshold. */
-        s_battery_shown = (uint8_t)((s_battery_shown * 3u + pmu.percent + 2u) /
-                                    4u);
-    }
-    mosu_ui_set_battery(s_battery_shown, true);
+    uint8_t shown = mosu_session_battery(&s_session, pmu.percent,
+                                         pmu.battery_present, immediate);
+    mosu_ui_set_battery(shown, pmu.battery_present);
 }
 
 static void update_wifi_icon(void)
@@ -172,19 +142,16 @@ static void update_wifi_icon(void)
     mosu_net_status_t status;
     mosu_net_status(&status);
 
-    mosu_ui_wifi_t icon = MOSU_UI_WIFI_IDLE;
-    if (status.state == MOSU_NET_FAILED) {
-        icon = MOSU_UI_WIFI_FAIL;
-    } else if (status.have_sync) {
-        icon = MOSU_UI_WIFI_OK;
-    }
-    mosu_ui_set_wifi(icon);
+    mosu_ui_set_wifi((mosu_ui_wifi_t)mosu_session_wifi_icon(
+        (mosu_session_net_state_t)status.state, status.have_sync));
 }
 
 static void screen_on(bool via_touch)
 {
-    if (s_screen_on) {
-        s_last_activity_ms = now_ms();
+    if (mosu_session_is_on(&s_session)) {
+        taskENTER_CRITICAL(&s_session_mux);
+        mosu_session_activity(&s_session, now_ms());
+        taskEXIT_CRITICAL(&s_session_mux);
         return;
     }
 
@@ -193,6 +160,7 @@ static void screen_on(bool via_touch)
         /* Brightness is restored on every wake: switching the panel off
          * sets it to zero. */
         mosu_board_brightness_set(s_cfg.display.brightness);
+        mosu_board_enable_touch_wake(false);
     }
 
     if (s_display_lock) {
@@ -210,16 +178,16 @@ static void screen_on(bool via_touch)
         }
     }
 
-    s_screen_on = true;
-    s_last_activity_ms = now_ms();
-    s_touch_seen = false;
+    taskENTER_CRITICAL(&s_session_mux);
+    mosu_session_screen_on(&s_session, now_ms());
+    taskEXIT_CRITICAL(&s_session_mux);
 
-    ESP_LOGD(TAG, "screen on (%s)", via_touch ? "touch" : "motion");
+    ESP_LOGI(TAG, "screen on (%s)", via_touch ? "touch" : "motion");
 }
 
 static void screen_off(void)
 {
-    if (!s_screen_on) {
+    if (!mosu_session_is_on(&s_session)) {
         return;
     }
 
@@ -229,17 +197,18 @@ static void screen_off(void)
     }
     if (s_display_ok) {
         mosu_board_display_off();
+        mosu_board_enable_touch_wake(s_cfg.display.wake_on_touch);
     }
     if (s_display_lock) {
         esp_pm_lock_release(s_display_lock);
     }
 
-    s_screen_on = false;
-    tap_reset();
+    taskENTER_CRITICAL(&s_session_mux);
+    mosu_session_screen_off(&s_session, now_ms());
+    taskEXIT_CRITICAL(&s_session_mux);
     mosu_wrist_reset(&s_wrist);
-    s_touch_seen = false;
 
-    ESP_LOGD(TAG, "screen off");
+    ESP_LOGI(TAG, "screen off");
 }
 
 /* ------------------------------------------------------------------- speech */
@@ -323,6 +292,90 @@ static void init_nvs(void)
     }
 }
 
+/* ---------------------------------------------------------------- console */
+
+/*
+ * The console runs in its own task.  It never touches LVGL, the PMU or the
+ * session directly: it leaves a request here and the app task performs it on
+ * its next pass, where screen_on()/screen_off() are safe to call.
+ */
+static volatile int s_diag_screen_request;   /* 0 none, 1 on, 2 off */
+static volatile int s_diag_pattern_request;  /* -1 none, else mosu_ui_test_t */
+static volatile bool s_diag_wifi_request;
+static bool s_test_pattern_active;
+static bool s_force_screen_on;
+
+static void diag_screen_on(void)
+{
+    s_force_screen_on = true;
+    s_diag_screen_request = 1;
+}
+
+static void diag_screen_off(void)
+{
+    s_force_screen_on = false;
+    s_test_pattern_active = false;
+    s_diag_screen_request = 2;
+}
+
+static void diag_test_pattern(int pattern)
+{
+    s_force_screen_on = false;
+    s_diag_pattern_request = pattern;
+    s_diag_screen_request = 1;
+}
+
+static void diag_power_wifi(void)
+{
+    s_diag_wifi_request = true;
+}
+
+static void diag_power_idle(void)
+{
+    s_force_screen_on = false;
+    s_test_pattern_active = false;
+    s_diag_pattern_request = (int)MOSU_UI_TEST_NONE;
+}
+
+static const mosu_diag_hooks_t s_diag_hooks = {
+    .screen_on = diag_screen_on,
+    .screen_off = diag_screen_off,
+    .test_pattern = diag_test_pattern,
+    .power_wifi = diag_power_wifi,
+    .power_idle = diag_power_idle,
+};
+
+static void handle_diag_requests(void)
+{
+    int screen = s_diag_screen_request;
+    s_diag_screen_request = 0;
+    if (screen == 1) {
+        screen_on(false);
+    } else if (screen == 2) {
+        screen_off();
+    }
+
+    int pattern = s_diag_pattern_request;
+    s_diag_pattern_request = -1;
+    if (pattern >= 0) {
+        s_test_pattern_active = pattern != (int)MOSU_UI_TEST_NONE;
+        if (!mosu_session_is_on(&s_session)) {
+            screen_on(false);
+        }
+        if (s_have_ui) {
+            mosu_ui_test_pattern((mosu_ui_test_t)pattern);
+        }
+        taskENTER_CRITICAL(&s_session_mux);
+        mosu_session_activity(&s_session, now_ms());
+        taskEXIT_CRITICAL(&s_session_mux);
+    }
+
+    if (s_diag_wifi_request) {
+        s_diag_wifi_request = false;
+        mosu_net_request_sync();
+    }
+}
+
 void app_main(void)
 {
     init_nvs();
@@ -342,7 +395,20 @@ void app_main(void)
         (uint16_t)(s_cfg.display.motion_angle_deg * 1000u);
     s_wrist_cfg.refractory_ms = s_cfg.display.motion_refractory_ms;
     mosu_wrist_init(&s_wrist);
-    tap_reset();
+
+    mosu_session_cfg_t session_cfg = {
+        .screen_on_ms = s_cfg.display.screen_on_ms,
+        .tap =
+            {
+                .double_tap_ms = s_cfg.announce.double_tap_ms,
+                .max_hold_ms = s_cfg.announce.max_hold_ms,
+                .max_move_px = s_cfg.announce.max_move_px,
+                .cooldown_ms = s_cfg.announce.cooldown_ms,
+            },
+        .battery_green_min = s_cfg.status.battery_green_min,
+        .battery_orange_min = s_cfg.status.battery_orange_min,
+    };
+    mosu_session_init(&s_session, &session_cfg);
 
     esp_pm_config_t pm_cfg = {
         .max_freq_mhz = 160,
@@ -377,6 +443,12 @@ void app_main(void)
 
     mosu_time_init(&s_cfg);
 
+    /* Face first, radio later: the first glance should not wait for Wi-Fi
+     * and the announcement task to come up. */
+    if (s_have_ui) {
+        screen_on(false);
+    }
+
     /* The codec is created once, then parked: enabling it on every
      * announcement would add a hiccup to the first word. */
     if (mosu_board_audio_init() == ESP_OK) {
@@ -386,9 +458,8 @@ void app_main(void)
     }
     mosu_audio_start(&s_cfg);
 
-    mosu_board_enable_touch_wake(s_cfg.display.wake_on_touch);
-
     mosu_net_start(&s_cfg);
+    mosu_diag_set_hooks(&s_diag_hooks);
     mosu_diag_start(&s_cfg);
 
     if (!s_have_ui) {
@@ -398,25 +469,26 @@ void app_main(void)
         }
     }
 
-    /* Show the time once at boot so the wearer knows the watch is alive,
-     * then go back to the normal always-off behaviour. */
-    if (s_have_ui) {
-        screen_on(false);
-    }
-
     uint32_t battery_poll = now_ms();
     uint32_t wifi_poll = 0;
 
     for (;;) {
+        handle_diag_requests();
         uint32_t now = now_ms();
 
-        if (s_screen_on) {
+        if (mosu_session_is_on(&s_session)) {
             update_time();
 
-            if (s_say_requested) {
-                s_say_requested = false;
+            bool say;
+            taskENTER_CRITICAL(&s_session_mux);
+            say = mosu_session_take_say(&s_session);
+            taskEXIT_CRITICAL(&s_session_mux);
+            if (say) {
                 speak_now();
-                s_last_activity_ms = now_ms();
+                /* Speaking earns a full window after the sentence. */
+                taskENTER_CRITICAL(&s_session_mux);
+                mosu_session_activity(&s_session, now_ms());
+                taskEXIT_CRITICAL(&s_session_mux);
             }
 
             if (battery_poll == 0 || (uint32_t)(now - battery_poll) >= 60000u) {
@@ -429,14 +501,16 @@ void app_main(void)
                 wifi_poll = now;
             }
 
-            /* Keep the face lit while it is speaking or while a finger is
-             * resting on the glass. */
-            if (mosu_audio_busy() || mosu_board_touch_active()) {
-                s_last_activity_ms = now_ms();
-            }
-
-            if ((uint32_t)(now - s_last_activity_ms) >=
-                s_cfg.display.screen_on_ms) {
+            /* Reading the two hardware booleans is slower than the critical
+             * section itself, so do it before taking the spinlock. */
+            bool audio = mosu_audio_busy();
+            bool touching = mosu_board_touch_active() || s_test_pattern_active ||
+                            s_force_screen_on;
+            taskENTER_CRITICAL(&s_session_mux);
+            bool sleep_now =
+                mosu_session_should_sleep(&s_session, now, audio, touching);
+            taskEXIT_CRITICAL(&s_session_mux);
+            if (sleep_now) {
                 screen_off();
             }
 
@@ -453,8 +527,13 @@ void app_main(void)
 
         vTaskDelay(pdMS_TO_TICKS(poll_ms));
 
+        bool touched;
+        taskENTER_CRITICAL(&s_session_mux);
+        touched = mosu_session_take_wake(&s_session);
+        taskEXIT_CRITICAL(&s_session_mux);
+
         if (s_cfg.display.wake_on_touch &&
-            (s_touch_seen || mosu_board_touch_active())) {
+            (touched || mosu_board_touch_active())) {
             screen_on(true);
             continue;
         }

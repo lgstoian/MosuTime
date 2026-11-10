@@ -36,6 +36,8 @@ static uint8_t s_shift_step;
 static uint32_t s_tap_until;
 static uint32_t s_tap_ms;
 
+static mosu_ui_test_t s_test;
+
 static mosu_ui_touch_cb_t s_touch_cb;
 static void *s_touch_user;
 
@@ -116,6 +118,105 @@ static void stroke_arc(lv_layer_t *layer, int32_t cx, int32_t cy, int32_t radius
     dsc.opa = LV_OPA_COVER;
     dsc.rounded = 1;
     lv_draw_arc(layer, &dsc);
+}
+
+/* ---------------------------------------------------------- test patterns */
+
+/*
+ * The patterns are drawn without the burn-in offset on purpose: they are a
+ * ruler for the glass, so a moving ruler would defeat the measurement.
+ */
+
+static void test_line(lv_layer_t *layer, int32_t x1, int32_t y1, int32_t x2,
+                      int32_t y2, int32_t width, uint32_t rgb)
+{
+    lv_draw_line_dsc_t dsc;
+    lv_draw_line_dsc_init(&dsc);
+    dsc.p1.x = (float)x1;
+    dsc.p1.y = (float)y1;
+    dsc.p2.x = (float)x2;
+    dsc.p2.y = (float)y2;
+    dsc.width = width;
+    dsc.color = lv_color_hex(rgb);
+    /* Square ends: a rounded cap would make a 1 px line look 2 px at the
+     * edge of the glass. */
+    dsc.round_start = 0;
+    dsc.round_end = 0;
+    lv_draw_line(layer, &dsc);
+}
+
+static void draw_test_colors(lv_layer_t *layer)
+{
+    static const uint32_t bands[] = {
+        0xFF0000, /* red */
+        0x00FF00, /* green */
+        0x0000FF, /* blue */
+        0xFFFFFF, /* white */
+        0x808080, /* grey */
+    };
+    const int32_t count = (int32_t)(sizeof(bands) / sizeof(bands[0]));
+
+    for (int32_t i = 0; i < count; i++) {
+        int32_t top = (MOSU_LCD_H * i) / count;
+        int32_t bottom = (MOSU_LCD_H * (i + 1)) / count;
+        fill_rect(layer, 0, top, MOSU_LCD_W, bottom - top, 0, bands[i],
+                  LV_OPA_COVER);
+    }
+}
+
+static void draw_test_grid(lv_layer_t *layer)
+{
+    fill_rect(layer, 0, 0, MOSU_LCD_W, MOSU_LCD_H, 0, 0x000000, LV_OPA_COVER);
+
+    for (int32_t x = 0; x < MOSU_LCD_W; x += 50) {
+        test_line(layer, x, 0, x, MOSU_LCD_H - 1, 1, 0xFFFFFF);
+    }
+    for (int32_t y = 0; y < MOSU_LCD_H; y += 50) {
+        test_line(layer, 0, y, MOSU_LCD_W - 1, y, 1, 0xFFFFFF);
+    }
+
+    /* The panel is 410 x 502: the last multiple of 50 is not the edge, so
+     * the border needs its own two lines. */
+    test_line(layer, MOSU_LCD_W - 1, 0, MOSU_LCD_W - 1, MOSU_LCD_H - 1, 1,
+              0xFFFFFF);
+    test_line(layer, 0, MOSU_LCD_H - 1, MOSU_LCD_W - 1, MOSU_LCD_H - 1, 1,
+              0xFFFFFF);
+}
+
+static void draw_test_corners(lv_layer_t *layer)
+{
+    const int32_t m = 20;
+
+    fill_rect(layer, 0, 0, MOSU_LCD_W, MOSU_LCD_H, 0, 0x000000, LV_OPA_COVER);
+    fill_rect(layer, 0, 0, m, m, 0, 0xFFFFFF, LV_OPA_COVER);
+    fill_rect(layer, MOSU_LCD_W - m, 0, m, m, 0, 0xFFFFFF, LV_OPA_COVER);
+    fill_rect(layer, 0, MOSU_LCD_H - m, m, m, 0, 0xFFFFFF, LV_OPA_COVER);
+    fill_rect(layer, MOSU_LCD_W - m, MOSU_LCD_H - m, m, m, 0, 0xFFFFFF,
+              LV_OPA_COVER);
+
+    /* The cross must sit in the middle of the visible area, not 22 px to one
+     * side: that is exactly the X gap the panel driver compensates for. */
+    const int32_t cx = MOSU_LCD_W / 2;
+    const int32_t cy = MOSU_LCD_H / 2;
+    test_line(layer, cx - 30, cy, cx + 30, cy, 2, 0xFFFFFF);
+    test_line(layer, cx, cy - 30, cx, cy + 30, 2, 0xFFFFFF);
+}
+
+static void draw_test_pattern(lv_layer_t *layer, mosu_ui_test_t pattern)
+{
+    switch (pattern) {
+    case MOSU_UI_TEST_COLORS:
+        draw_test_colors(layer);
+        break;
+    case MOSU_UI_TEST_GRID:
+        draw_test_grid(layer);
+        break;
+    case MOSU_UI_TEST_CORNERS:
+        draw_test_corners(layer);
+        break;
+    default:
+        break;
+    }
 }
 
 /* ---------------------------------------------------------------- numerals */
@@ -243,6 +344,11 @@ static void draw_event_cb(lv_event_t *event)
         return;
     }
 
+    if (s_test != MOSU_UI_TEST_NONE) {
+        draw_test_pattern(layer, s_test);
+        return;
+    }
+
     uint8_t hour12;
     bool pm;
     mosu_time_split12(s_hour24, &hour12, &pm);
@@ -305,6 +411,12 @@ static void housekeeping_timer(lv_timer_t *timer)
 static void shift_timer(lv_timer_t *timer)
 {
     (void)timer;
+
+    /* A test pattern is a ruler: moving it would make the measurement
+     * meaningless, so skip the repaint while one is shown. */
+    if (s_test != MOSU_UI_TEST_NONE) {
+        return;
+    }
 
     s_shift_step = (uint8_t)((s_shift_step + 1) % 9);
     s_dx = (int8_t)(((int)s_shift_step / 3 - 1) * MOSU_SHIFT_PX);
@@ -434,6 +546,32 @@ void mosu_ui_flash_tap(void)
 
     if (lvgl_port_lock(1000)) {
         s_tap_until = lv_tick_get() + s_tap_ms;
+        invalidate();
+        lvgl_port_unlock();
+    }
+}
+
+void mosu_ui_test_pattern(mosu_ui_test_t pattern)
+{
+    switch (pattern) {
+    case MOSU_UI_TEST_NONE:
+    case MOSU_UI_TEST_COLORS:
+    case MOSU_UI_TEST_GRID:
+    case MOSU_UI_TEST_CORNERS:
+        break;
+    default:
+        /* An unknown value from the console must not leave the face stuck
+         * on a pattern that nobody knows how to name. */
+        pattern = MOSU_UI_TEST_NONE;
+        break;
+    }
+
+    s_test = pattern;
+
+    if (!s_screen) {
+        return;
+    }
+    if (lvgl_port_lock(1000)) {
         invalidate();
         lvgl_port_unlock();
     }

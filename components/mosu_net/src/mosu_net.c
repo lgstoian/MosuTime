@@ -34,6 +34,7 @@ static const char *TAG = "mosu_net";
 #define BIT_FAILED BIT1
 
 static const mosu_config_t *s_cfg;
+static mosu_config_t s_cfg_store;
 static EventGroupHandle_t s_events;
 static TaskHandle_t s_task;
 static volatile bool s_sync_requested;
@@ -141,8 +142,11 @@ static bool fetch_timezone(char *out, size_t out_len)
 
     if (esp_http_client_open(client, 0) == ESP_OK) {
         esp_http_client_fetch_headers(client);
+        int status = esp_http_client_get_status_code(client);
         int read = esp_http_client_read(client, body, sizeof(body) - 1);
-        if (read > 0) {
+        if (status != 200) {
+            ESP_LOGW(TAG, "timezone service returned HTTP %d", status);
+        } else if (read > 0) {
             body[read] = '\0';
 
             const char *marker = strstr(body, "\"timezone\"");
@@ -176,6 +180,12 @@ static bool fetch_timezone(char *out, size_t out_len)
                     memcpy(out, start, (size_t)(finish - start) + 1);
                     ok = true;
                 }
+            }
+
+            /* An error page or an HTML body must never reach setenv(). */
+            if (ok && !mosu_config_timezone_ok(out)) {
+                ESP_LOGW(TAG, "timezone answer is not a zone: '%s'", out);
+                ok = false;
             }
         }
     }
@@ -294,7 +304,10 @@ esp_err_t mosu_net_start(const mosu_config_t *cfg)
     if (!cfg) {
         return ESP_ERR_INVALID_ARG;
     }
-    s_cfg = cfg;
+    /* Work from a private copy: the console can change brightness and volume
+     * in the live config while this task is running. */
+    s_cfg_store = *cfg;
+    s_cfg = &s_cfg_store;
 
     s_events = xEventGroupCreate();
     if (!s_events) {

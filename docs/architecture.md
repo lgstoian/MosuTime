@@ -19,6 +19,7 @@ not in the amount of code, it is in what is *not* running.
                         ESP-IDF drivers, LVGL, esp_lcd, esp_codec_dev
 
  mosu_config (INI + NVS)      mosu_core (pure C, no ESP-IDF)
+                              mosu_session (pure C state machine)
 ```
 
 `mosu_core` is compiled three times: into the firmware, into the host test
@@ -27,6 +28,11 @@ global state, so the three builds cannot drift apart in behaviour.
 
 `mosu_config` also stays portable except for `mosu_config_store.c`, which owns
 the NVS cache.
+
+`mosu_session` is the watch's behaviour without the watch: screen on/off, the
+double tap, the speak request, the inactivity deadline, battery smoothing and
+the status-icon mapping. `app_main` feeds it timestamped samples and acts on
+its answers, which is why those rules are covered by the host tests.
 
 ## Boot
 
@@ -42,10 +48,13 @@ the NVS cache.
 5. Start the panel, touch and LVGL; create the watch face.
 6. `mosu_time_init`: set the timezone, restore the clock from the RTC, apply
    `manual_time` if there is no valid RTC.
-7. Initialise the codec once and park it (I2S disabled, codec closed).
-8. Start the announcement task, the touch interrupt, the network task and the
-   console.
-9. Show the face for one `screen_on_ms` window, then behave normally.
+7. Show the face immediately after the time is restored, before the radio and
+   the console come up, so the first glance is fast.
+8. Initialise the codec once and park it (I2S disabled, codec closed), then
+   start the announcement task, the touch wake source, the network task and
+   the console.
+9. From then on the session state machine owns the screen, and the console can
+   drive test patterns and power states for bring-up.
 
 ## The screen state machine
 
@@ -155,10 +164,11 @@ the RTC.
 
 Three layers, each catching a different class of mistake:
 
-1. **Host tests** (`test/host`) compile `mosu_core` and the INI parser with a
-   normal C compiler and check the formatting, phrase rules, battery curve,
-   tap/wrist state machines and config edge cases (184 checks). They are also
-   the fastest way to change a rule: no ESP-IDF, no board.
+1. **Host tests** (`test/host`) compile `mosu_core`, `mosu_session` and the INI
+   parser with a normal C compiler and check the formatting, phrase rules,
+   battery curve, tap/wrist state machines, the screen/session rules and
+   config edge cases (312 checks, including fuzzed config documents). They are
+   also the fastest way to change a rule: no ESP-IDF, no board.
 2. **Desktop simulator** (`sim/`) renders the real layout constants and the
    real seven-segment code into BMP files, so a visual change can be reviewed
    without any hardware.

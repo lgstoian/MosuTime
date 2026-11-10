@@ -195,7 +195,9 @@ esp_err_t mosu_board_display_start(void)
     }
 
     /* The touch interrupt is also a wake source. */
-    ESP_RETURN_ON_ERROR(mosu_board_enable_touch_wake(true), TAG, "wake");
+    /* The panel starts up with the face on, so the touch interrupt stays a
+     * normal falling edge.  The level wake source is enabled in screen_off. */
+    ESP_RETURN_ON_ERROR(mosu_board_enable_touch_wake(false), TAG, "wake");
 
     s_display_on = true;
     ESP_LOGI(TAG, "display ready (%dx%d)", MOSU_LCD_H_RES, MOSU_LCD_V_RES);
@@ -259,12 +261,20 @@ esp_err_t mosu_board_enable_touch_wake(bool enable)
     esp_err_t err = ESP_OK;
 
     if (enable) {
+        /* Light sleep only accepts a level trigger.  While the face is off we
+         * do not poll the touch controller, so the level is what wakes us. */
         err = gpio_wakeup_enable(MOSU_PIN_TOUCH_INT, GPIO_INTR_LOW_LEVEL);
         if (err == ESP_OK) {
             err = esp_sleep_enable_gpio_wakeup();
         }
     } else {
         err = gpio_wakeup_disable(MOSU_PIN_TOUCH_INT);
+        /* gpio_wakeup_enable() changes the pin to level-low; the LVGL touch
+         * ISR expects the original falling edge.  Put it back. */
+        if (gpio_set_intr_type(MOSU_PIN_TOUCH_INT, GPIO_INTR_NEGEDGE) !=
+            ESP_OK) {
+            ESP_LOGW(TAG, "could not restore the touch edge interrupt");
+        }
     }
     return err;
 }

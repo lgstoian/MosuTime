@@ -19,5 +19,7 @@ idf_component_register(
         vfs
         sdmmc
         esp_timer
+        esp_pm
+        heap
         mosu_core
 )

@@ -10,6 +10,8 @@
  * They are deliberately tiny: every register used here is documented in the
  * source, so the code can be audited without a vendor library.
  */
+#include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "driver/i2c_master.h"
@@ -319,6 +321,144 @@ esp_err_t mosu_board_imu_read(mosu_board_accel_t *out)
     out->y = (float)y / (float)s_imu_lsb_div;
     out->z = (float)z / (float)s_imu_lsb_div;
     return ESP_OK;
+}
+
+/* ------------------------------------------------------------ diagnostics */
+
+static const char *i2c_name(uint8_t address)
+{
+    switch (address) {
+    case AXP2101_ADDR:
+        return "AXP2101 PMU";
+    case PCF85063_ADDR:
+        return "PCF85063 RTC";
+    case QMI8658_ADDR:
+        return "QMI8658 IMU";
+    case 0x18:
+        return "ES8311 codec";
+    default:
+        return NULL;
+    }
+}
+
+esp_err_t mosu_board_i2c_scan(void)
+{
+    if (!s_bus) {
+        printf("i2c : bus not started\n");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    printf("i2c : scan SDA %d / SCL %d, 0x08..0x77\n", MOSU_PIN_I2C_SDA,
+           MOSU_PIN_I2C_SCL);
+
+    int found = 0;
+    for (uint8_t address = 0x08; address <= 0x77; address++) {
+        if (i2c_master_probe(s_bus, address, 50) != ESP_OK) {
+            continue;
+        }
+        const char *name = i2c_name(address);
+        printf("      0x%02X  %s\n", address, name ? name : "unknown device");
+        found++;
+    }
+
+    printf("i2c : %d device(s) answered\n", found);
+    /* An empty bus is a finding, not an error: the table above already says
+     * what is missing. */
+    return ESP_OK;
+}
+
+void mosu_board_pmu_dump(void)
+{
+    if (!s_pmu) {
+        printf("pmu : not initialised\n");
+        return;
+    }
+
+    /* The first status bytes cover the supply and charge state; they are
+     * printed raw so the console can be compared with the datasheet. */
+    for (uint8_t reg = 0x00; reg <= 0x02; reg++) {
+        uint8_t value = 0;
+        esp_err_t err = reg_read(s_pmu, reg, &value, 1);
+        if (err != ESP_OK) {
+            printf("pmu : register 0x%02X read failed (%s)\n", reg,
+                   esp_err_to_name(err));
+            return;
+        }
+        printf("pmu : reg 0x%02X = 0x%02X\n", reg, value);
+    }
+
+    mosu_board_pmu_t pmu;
+    esp_err_t err = mosu_board_pmu_read(&pmu);
+    if (err != ESP_OK) {
+        printf("pmu : decode failed (%s)\n", esp_err_to_name(err));
+        return;
+    }
+
+    printf("pmu : battery %s, vbus %s, charging %s\n",
+           pmu.battery_present ? "present" : "absent",
+           pmu.vbus_present ? "present" : "absent",
+           pmu.charging ? "yes" : "no");
+    printf("pmu : %u mV, %u%%\n", (unsigned)pmu.millivolts,
+           (unsigned)pmu.percent);
+}
+
+void mosu_board_rtc_dump(void)
+{
+    if (!s_rtc) {
+        printf("rtc : not initialised\n");
+        return;
+    }
+
+    uint8_t raw[7];
+    esp_err_t err = reg_read(s_rtc, 0x02, raw, sizeof(raw));
+    if (err != ESP_OK) {
+        printf("rtc : read failed (%s)\n", esp_err_to_name(err));
+        return;
+    }
+
+    printf("rtc : 0x02..0x08 = %02X %02X %02X %02X %02X %02X %02X\n", raw[0],
+           raw[1], raw[2], raw[3], raw[4], raw[5], raw[6]);
+
+    struct tm utc;
+    if (mosu_board_rtc_read(&utc) != ESP_OK) {
+        printf("rtc : decode failed\n");
+        return;
+    }
+
+    printf("rtc : UTC %04d-%02d-%02d %02d:%02d:%02d, valid %d\n",
+           utc.tm_year + 1900, utc.tm_mon + 1, utc.tm_mday, utc.tm_hour,
+           utc.tm_min, utc.tm_sec, (int)mosu_board_rtc_valid());
+}
+
+void mosu_board_imu_dump(void)
+{
+    if (!s_imu) {
+        printf("imu : not initialised\n");
+        return;
+    }
+
+    uint8_t who = 0;
+    esp_err_t err = reg_read(s_imu, 0x00, &who, 1);
+    if (err != ESP_OK) {
+        printf("imu : WHO_AM_I read failed (%s)\n", esp_err_to_name(err));
+        return;
+    }
+    printf("imu : WHO_AM_I 0x%02X (%s)\n", who,
+           who == 0x05 ? "QMI8658" : "unexpected value");
+
+    mosu_board_accel_t accel;
+    err = mosu_board_imu_read(&accel);
+    if (err != ESP_OK) {
+        printf("imu : accel read failed (%s)\n", esp_err_to_name(err));
+        return;
+    }
+
+    float magnitude =
+        sqrtf(accel.x * accel.x + accel.y * accel.y + accel.z * accel.z);
+    printf("imu : accel %.3f %.3f %.3f g, |a| %.3f g\n", accel.x, accel.y,
+           accel.z, magnitude);
+    /* At rest the magnitude is 1 g; a different value means the scale or
+     * the mounting orientation is not what the datasheet promises. */
 }
 
 /* --------------------------------------------------------------- boot IO */

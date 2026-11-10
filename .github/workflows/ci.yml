@@ -49,3 +49,35 @@ jobs:
           esp_idf_version: v5.5.5
           target: esp32s3
           path: "."
+
+  static:
+    name: Static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cppcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cppcheck
+
+      # Only the host-buildable pure C components: they are free of ESP-IDF
+      # headers, so cppcheck can analyse them without the toolchain.  There is
+      # deliberately no clang-format gate: .clang-format is a reference for new
+      # files, and reformatting the existing tree in CI would be pure noise.
+      - name: cppcheck the pure C components
+        run: |
+          set -eu
+          sources="components/mosu_core/src components/mosu_config/src"
+          includes="-I components/mosu_core/include -I components/mosu_config/include"
+          if [ -d components/mosu_session/src ]; then
+            sources="$sources components/mosu_session/src"
+            includes="$includes -I components/mosu_session/include"
+          fi
+          # Word splitting is intended: the lists above are argument lists.
+          cppcheck \
+            --enable=warning,performance,portability \
+            --error-exitcode=1 \
+            --std=c11 \
+            --quiet \
+            $includes $sources

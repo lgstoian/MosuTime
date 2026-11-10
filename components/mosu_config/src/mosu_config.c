@@ -275,8 +275,26 @@ static bool set_int(const char *value, long min, long max, int *out)
     return true;
 }
 
+/*
+ * Copy a network field, but say so when the value does not fit.  Silently
+ * cutting an SSID produces a watch that simply refuses to connect, which is
+ * much harder to diagnose than one warning in the boot log.
+ */
+static void copy_net_str(char *dst, size_t dst_len, const char *src,
+                         mosu_config_report_t *report, bool password,
+                         const char *key)
+{
+    if (strlen(src) >= dst_len) {
+        report_warn(report,
+                    password ? "password too long for %s"
+                             : "SSID too long for %s",
+                    key);
+    }
+    copy_str(dst, dst_len, src);
+}
+
 static void parse_wifi_key(mosu_config_t *cfg, const char *key,
-                           const char *value)
+                           const char *value, mosu_config_report_t *report)
 {
     if (strncasecmp(key, "network", 7) != 0) {
         return;
@@ -285,7 +303,12 @@ static void parse_wifi_key(mosu_config_t *cfg, const char *key,
     const char *p = key + 7;
     int index = 0;
     while (*p >= '0' && *p <= '9') {
-        index = index * 10 + (*p - '0');
+        /* Fuzzed input can contain a thousand digits; stop accumulating
+         * before the signed int overflows.  Anything past the last valid
+         * network is rejected below anyway. */
+        if (index <= 1000) {
+            index = index * 10 + (*p - '0');
+        }
         p++;
     }
     if (*p != '_' || index < 1 || index > MOSU_CFG_WIFI_MAX) {
@@ -295,9 +318,9 @@ static void parse_wifi_key(mosu_config_t *cfg, const char *key,
 
     mosu_wifi_cfg_t *net = &cfg->wifi[index - 1];
     if (!strcasecmp(p, "ssid")) {
-        copy_str(net->ssid, sizeof(net->ssid), value);
+        copy_net_str(net->ssid, sizeof(net->ssid), value, report, false, key);
     } else if (!strcasecmp(p, "pass") || !strcasecmp(p, "password")) {
-        copy_str(net->pass, sizeof(net->pass), value);
+        copy_net_str(net->pass, sizeof(net->pass), value, report, true, key);
     }
 }
 
@@ -509,7 +532,7 @@ static void apply_key(mosu_config_t *cfg, section_t section, const char *key,
         break;
 
     case SEC_WIFI:
-        parse_wifi_key(cfg, key, value);
+        parse_wifi_key(cfg, key, value, report);
         break;
 
     case SEC_ANNOUNCE:
@@ -593,6 +616,13 @@ int mosu_config_parse(mosu_config_t *cfg, const char *text, size_t len,
     section_t section = SEC_NONE;
     const char *cursor = text;
     const char *end = text + len;
+
+    /* Editors on Windows like to prefix the file with a UTF-8 BOM.  It is not
+     * part of the first key, so skip it once, at the document start only. */
+    if ((size_t)(end - cursor) >= 3 && (unsigned char)cursor[0] == 0xEF &&
+        (unsigned char)cursor[1] == 0xBB && (unsigned char)cursor[2] == 0xBF) {
+        cursor += 3;
+    }
 
     while (cursor < end) {
         const char *eol = memchr(cursor, '\n', (size_t)(end - cursor));

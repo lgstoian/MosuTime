@@ -44,12 +44,27 @@ esp_err_t mosu_config_store_save(const mosu_config_t *cfg)
     /* Single blob: one write, one erase, no partial config. */
     size_t blob_len = sizeof(header) + sizeof(*cfg);
     uint8_t *blob = malloc(blob_len);
-    if (!blob) {
+    uint8_t *old = malloc(blob_len);
+    if (!blob || !old) {
+        free(blob);
+        free(old);
         nvs_close(handle);
         return ESP_ERR_NO_MEM;
     }
     memcpy(blob, &header, sizeof(header));
     memcpy(blob + sizeof(header), cfg, sizeof(*cfg));
+
+    /* The SD config is written back at every boot.  Compare first: the NVS
+     * blob is only rewritten when something actually changed. */
+    size_t old_len = blob_len;
+    if (nvs_get_blob(handle, KEY_CFG, old, &old_len) == ESP_OK &&
+        old_len == blob_len && memcmp(old, blob, blob_len) == 0) {
+        free(blob);
+        free(old);
+        nvs_close(handle);
+        return ESP_OK;
+    }
+    free(old);
 
     err = nvs_set_blob(handle, KEY_CFG, blob, blob_len);
     if (err == ESP_OK) {

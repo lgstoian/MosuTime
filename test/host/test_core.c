@@ -11,28 +11,10 @@
 
 #include "mosu_config.h"
 #include "mosu_core/mosu_core.h"
+#include "test_util.h"
 
-static int g_failures;
-static int g_checks;
-
-#define EXPECT(cond)                                                          \
-    do {                                                                      \
-        g_checks++;                                                           \
-        if (!(cond)) {                                                        \
-            printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #cond);            \
-            g_failures++;                                                     \
-        }                                                                     \
-    } while (0)
-
-#define EXPECT_STR(a, b)                                                      \
-    do {                                                                      \
-        g_checks++;                                                           \
-        if (strcmp((a), (b)) != 0) {                                          \
-            printf("FAIL %s:%d  \"%s\" != \"%s\"\n", __FILE__, __LINE__, (a), \
-                   (b));                                                      \
-            g_failures++;                                                     \
-        }                                                                     \
-    } while (0)
+int g_failures;
+int g_checks;
 
 static void test_12h(void)
 {
@@ -311,6 +293,8 @@ int main(void)
     test_tap();
     test_wrist();
     test_config();
+    test_session();
+    test_config_extra();
 
     printf("\n%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

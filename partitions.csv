@@ -1,6 +1,6 @@
 # MosuTime partition table - 32 MB flash
-# Two OTA slots are reserved from day one so the watch can be updated in the
-# field without a USB cable.
+# Two OTA slots are reserved from day one.  There is no OTA client in the
+# firmware yet: today the watch is updated over USB (docs/maintenance.md).
 # Name,     Type, SubType,  Offset,    Size
 nvs,        data, nvs,      0x9000,    0x6000
 otadata,    data, ota,      0xf000,    0x2000

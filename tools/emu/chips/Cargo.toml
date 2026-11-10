@@ -1,0 +1,31 @@
+# The watch's three simple I2C register files, as one virtual part.
+#
+# esp-emu 1.0.0-rc2 answers I2C on a port only through the parts wired to it:
+# a `regfile` device on the same port is not asked.  The touch and IMU parts
+# therefore shadow the AXP2101, PCF85063 and ES8311 register files in
+# board-interactive.json, and this part supplies them with the values the
+# regfile devices in board.json carry.  See ../README.md.
+#
+# Build (WSL or Linux, with a clone of esp-emulator checked out next to this
+# repository):
+#
+#   ESP_COSIM_PROTO_DIR=/mnt/d/Code/esp-emulator/proto \
+#     cargo build --release --target wasm32-unknown-unknown
+[workspace]
+
+[package]
+name = "mosu_chips"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+esp-part = { path = "../../../../esp-emulator/esp-part" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

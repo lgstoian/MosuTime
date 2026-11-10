@@ -126,3 +126,22 @@ bool mosu_board_sdcard_ready(void)
 {
     return s_card != NULL;
 }
+
+esp_err_t mosu_board_sdcard_remount(void)
+{
+    if (s_running) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    mosu_board_sdcard_unmount();
+
+    /* A previous mount may have finished after its caller gave up waiting.
+     * Drop that stale token, or the next mount would report the old result
+     * without touching the card. */
+    if (s_done) {
+        while (xSemaphoreTake(s_done, 0) == pdTRUE) {
+        }
+    }
+
+    return mosu_board_sdcard_mount();
+}
