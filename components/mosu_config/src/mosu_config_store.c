@@ -2,6 +2,8 @@
  * SPDX-FileCopyrightText: 2026 Stoian Alexandru
  * SPDX-License-Identifier: MIT
  */
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_log.h"

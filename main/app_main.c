@@ -405,9 +405,17 @@ void app_main(void)
     mosu_audio_start(&s_cfg);
 
     start_touch_interrupt();
+    mosu_board_enable_touch_wake(s_cfg.display.wake_on_touch);
 
     mosu_net_start(&s_cfg);
     mosu_diag_start(&s_cfg);
+
+    if (!s_have_ui) {
+        ESP_LOGE(TAG, "no watch face: running headless for diagnostics");
+        for (;;) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+    }
 
     /* Show the time once at boot so the wearer knows the watch is alive,
      * then go back to the normal always-off behaviour. */

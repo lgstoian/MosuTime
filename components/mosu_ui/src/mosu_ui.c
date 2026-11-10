@@ -356,6 +356,9 @@ esp_err_t mosu_ui_create(const mosu_config_t *cfg)
 
 void mosu_ui_set_time(uint8_t hour24, uint8_t minute, bool valid)
 {
+    if (!s_screen) {
+        return;
+    }
     if (s_hour24 == hour24 && s_minute == minute && s_valid == valid) {
         return;
     }
@@ -371,6 +374,9 @@ void mosu_ui_set_time(uint8_t hour24, uint8_t minute, bool valid)
 
 void mosu_ui_set_battery(uint8_t percent, bool present)
 {
+    if (!s_screen) {
+        return;
+    }
     if (s_battery == percent && s_battery_present == present) {
         return;
     }
@@ -385,6 +391,9 @@ void mosu_ui_set_battery(uint8_t percent, bool present)
 
 void mosu_ui_set_wifi(mosu_ui_wifi_t state)
 {
+    if (!s_screen) {
+        return;
+    }
     if (s_wifi == state) {
         return;
     }
@@ -404,6 +413,9 @@ void mosu_ui_set_touch_cb(mosu_ui_touch_cb_t cb, void *user)
 
 void mosu_ui_refresh(void)
 {
+    if (!s_screen) {
+        return;
+    }
     if (lvgl_port_lock(1000)) {
         invalidate();
         lvgl_port_unlock();
@@ -412,6 +424,9 @@ void mosu_ui_refresh(void)
 
 void mosu_ui_flash_tap(void)
 {
+    if (!s_cfg || !s_screen) {
+        return;
+    }
     s_tap_ms = s_cfg->display.tap_feedback_ms;
     if (s_tap_ms == 0) {
         return;

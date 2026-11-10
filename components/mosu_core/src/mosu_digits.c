@@ -114,6 +114,14 @@ int16_t mosu_digits_draw(const mosu_canvas_t *canvas,
     for (const char *p = text; *p; p++) {
         if (*p >= '0' && *p <= '9') {
             mosu_digit_draw(canvas, style, cursor, y, (uint8_t)(*p - '0'));
+        } else if (*p == '-' && canvas->line) {
+            /* A dash is the placeholder for an unknown time. */
+            int16_t t = style->stroke < 2 ? 2 : style->stroke;
+            int16_t inset = (int16_t)(t / 2 + 1);
+            int16_t cy = (int16_t)(y + style->height / 2);
+            canvas->line(canvas->ctx, (int16_t)(cursor + inset), cy,
+                         (int16_t)(cursor + style->width - inset), cy,
+                         (uint8_t)t, style->color);
         }
         cursor = (int16_t)(cursor + style->width + gap);
     }

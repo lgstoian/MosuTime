@@ -112,6 +112,8 @@ esp_err_t mosu_board_pmu_init(void)
     ESP_RETURN_ON_ERROR(pmu_update(0x30, 0x0F, 0x0D), TAG, "pmu adc");
     /* Battery detection. */
     ESP_RETURN_ON_ERROR(pmu_update(0x68, 0x01, 0x01), TAG, "pmu batdet");
+    /* Never charge past 4.2 V: this is an ordinary single-cell LiPo. */
+    ESP_RETURN_ON_ERROR(pmu_update(0x64, 0x03, 0x02), TAG, "pmu cv");
 
     ESP_LOGI(TAG, "AXP2101 ready (status 0x%02X)", status);
     return ESP_OK;
