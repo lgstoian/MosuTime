@@ -1,0 +1,12 @@
+menu "MosuTime"
+
+    config MOSU_SKIP_SD
+        bool "Skip mounting the SD card (emulator / firmware tests)"
+        default n
+        help
+            The ESP32-S3 emulator does not model an SD card, and its SDMMC
+            controller keeps the CPU busy while it waits for one.  Enable this
+            only for emulator builds: the watch then starts with the NVS
+            configuration and stays silent.
+
+endmenu

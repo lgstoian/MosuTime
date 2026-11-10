@@ -272,6 +272,23 @@ esp_err_t mosu_time_set_epoch(time_t utc)
     return ESP_OK;
 }
 
+esp_err_t mosu_time_set_epoch_manual(time_t utc)
+{
+    if (utc <= 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    struct timeval tv = {.tv_sec = utc, .tv_usec = 0};
+    if (settimeofday(&tv, NULL) != 0) {
+        return ESP_FAIL;
+    }
+
+    s_valid = true;
+    mosu_time_persist_rtc();
+    ESP_LOGI(TAG, "clock set manually");
+    return ESP_OK;
+}
+
 uint32_t mosu_time_sync_age_s(void)
 {
     if (!s_have_sync) {

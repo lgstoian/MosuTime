@@ -1,0 +1,32 @@
+# A passive CO5300 / SH8601 QSPI panel, built as a virtual part.
+#
+# The emulator only records SPI traffic that belongs to a part, so this part
+# claims the panel's chip select and accepts (but ignores) the writes.  The
+# host-side tools/emu/reconstruct.py rebuilds the framebuffer from the
+# --cosim-log stream.
+#
+# Build (WSL or Linux, with a clone of esp-emulator checked out at
+# ../../../..//esp-emulator, i.e. next to this repository):
+#
+#   cargo build --release --target wasm32-unknown-unknown
+#
+# The part path below assumes that layout.  Point it at your clone if it lives
+# elsewhere.
+[workspace]
+
+[package]
+name = "mosu_panel"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+esp-part = { path = "../../../../esp-emulator/esp-part" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

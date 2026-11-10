@@ -1,23 +1,33 @@
 /*
  * SPDX-FileCopyrightText: 2026 Stoian Alexandru
  * SPDX-License-Identifier: MIT
+ *
+ * The SD card is optional: a dirty, missing or badly seated card must never
+ * stop the watch from showing the time.  The blocking FAT mount therefore runs
+ * in its own task and the boot waits only a few seconds for it.
  */
 #include "driver/sdmmc_host.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
 #include "sdmmc_cmd.h"
 
 #include "mosu_board.h"
 
 static const char *TAG = "mosu_sd";
+
+#define MOSU_SD_WAIT_MS 3000
+#define MOSU_SD_TASK_STACK 6144
+
 static sdmmc_card_t *s_card;
+static SemaphoreHandle_t s_done;
+static volatile bool s_ok;
+static volatile bool s_running;
 
-esp_err_t mosu_board_sdcard_mount(void)
+static esp_err_t mount_now(void)
 {
-    if (s_card) {
-        return ESP_OK;
-    }
-
     const esp_vfs_fat_sdmmc_mount_config_t mount_cfg = {
         .format_if_mount_failed = false,
         .max_files = 6,
@@ -44,17 +54,63 @@ esp_err_t mosu_board_sdcard_mount(void)
         .flags = 0,
     };
 
-    esp_err_t err =
-        esp_vfs_fat_sdmmc_mount(MOSU_SD_MOUNT_POINT, &host, &slot_cfg,
-                                &mount_cfg, &s_card);
+    return esp_vfs_fat_sdmmc_mount(MOSU_SD_MOUNT_POINT, &host, &slot_cfg,
+                                   &mount_cfg, &s_card);
+}
+
+static void mount_task(void *arg)
+{
+    (void)arg;
+
+    esp_err_t err = mount_now();
     if (err != ESP_OK) {
         s_card = NULL;
         ESP_LOGW(TAG, "SD card not mounted: %s", esp_err_to_name(err));
-        return err;
+    } else {
+        ESP_LOGI(TAG, "SD card mounted at %s", MOSU_SD_MOUNT_POINT);
     }
 
-    ESP_LOGI(TAG, "SD card mounted at %s", MOSU_SD_MOUNT_POINT);
-    return ESP_OK;
+    s_ok = (err == ESP_OK);
+    s_running = false;
+    xSemaphoreGive(s_done);
+    vTaskDelete(NULL);
+}
+
+esp_err_t mosu_board_sdcard_mount(void)
+{
+    if (s_card) {
+        return ESP_OK;
+    }
+    if (s_running) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+#if CONFIG_MOSU_SKIP_SD
+    ESP_LOGW(TAG, "SD mount disabled at build time");
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
+
+    if (!s_done) {
+        s_done = xSemaphoreCreateBinary();
+        if (!s_done) {
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
+    s_running = true;
+    if (xTaskCreate(mount_task, "mosu_sd", MOSU_SD_TASK_STACK, NULL, 3, NULL) !=
+        pdPASS) {
+        s_running = false;
+        return ESP_ERR_NO_MEM;
+    }
+
+    if (xSemaphoreTake(s_done, pdMS_TO_TICKS(MOSU_SD_WAIT_MS)) != pdTRUE) {
+        ESP_LOGW(TAG, "SD card did not answer in %d ms, continuing without it",
+                 MOSU_SD_WAIT_MS);
+        return ESP_ERR_TIMEOUT;
+    }
+
+    return s_ok ? ESP_OK : ESP_FAIL;
 }
 
 void mosu_board_sdcard_unmount(void)

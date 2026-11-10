@@ -19,12 +19,15 @@ A double tap on the glass says the time out loud in Romanian, for example
 *"Este ora două și treizeci de minute. Marți."* The voice clips live on the SD
 card, not in flash.
 
-| Day (AM) | Evening (PM) |
-| --- | --- |
-| ![AM face](docs/preview-am.png) | ![PM face](docs/preview-pm.png) |
+| Day (AM) | Evening (PM) | Time not set |
+| --- | --- | --- |
+| ![AM face](docs/emulator/am.png) | ![PM face](docs/emulator/pm.png) | ![Unknown time](docs/emulator/unknown.png) |
 
-The pictures above are produced by the desktop simulator, using the same digit
-geometry and layout constants as the firmware.
+These three pictures come from the firmware itself running in the
+[ESP32 emulator](tools/emu/README.md): the actual LVGL frame, sent over QSPI,
+was reconstructed from the emulator's bus log. The desktop simulator
+(`sim/`) draws the same face with the same digit geometry and layout constants
+for a quick preview without any emulator.
 
 ## Design rules
 
@@ -171,6 +174,26 @@ looked at. The exact figure depends on the cell, the number of wrist raises and
 the sync interval; measure it with `idf.py monitor` and the `status` command
 before promising anything to the wearer.
 
+## Emulator
+
+There is no need for the watch to be on the desk to see what it does. The
+firmware runs in [esp-emu](https://github.com/espressif/esp-emulator) with a
+virtual CO5300 panel and `regfile` models of the AXP2101, PCF85063, QMI8658,
+FT3168 and ES8311. The panel part records every QSPI transfer, and
+`tools/emu/reconstruct.py` turns that stream back into a 410 x 502 PNG - the
+pictures at the top of this file are made that way.
+
+```sh
+tools/emu/capture.sh
+```
+
+The script boots the firmware three times (AM, PM with `settime`, unknown time)
+and checks that each run reaches "watch face ready". See
+[`tools/emu/README.md`](tools/emu/README.md) for the one-time setup and for
+what the emulator does and does not model. It also shows how to drive the
+console with `--inject-on`/`--inject`, which is how the phrase builder was
+checked (`h_9.wav`, `m_41.wav`, `d_1.wav` at 09:41 on a Tuesday).
+
 ## Desktop preview and tests
 
 The pure C core (time formatting, phrase building, battery curve, tap and
@@ -208,6 +231,7 @@ main/           power state machine
 sim/            desktop preview
 test/host/      host tests
 tools/          voice generation, build helper
+tools/emu/      esp-emu board, panel part, screenshot reconstruction
 ```
 
 The clock numerals are drawn, not shaped from a font: each digit is a handful

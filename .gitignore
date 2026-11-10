@@ -10,8 +10,15 @@ dependencies.lock
 
 # Host builds
 build-host/
+build-emu/
 sim/out/
 test/host/build/
+
+# Emulator captures
+emu-*.jsonl
+emu-*.log
+emu-*.png
+tools/emu/panel/target/
 
 # Tool caches / generated audio
 tools/.cache/

@@ -18,6 +18,8 @@
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "esp_sleep.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #include "mosu_board.h"
 #include "mosu_board_priv.h"
@@ -48,6 +50,19 @@ static const sh8601_lcd_init_cmd_t s_init_cmds[] = {
     {0x29, (uint8_t[]){0x00}, 0, 10},
     {0x51, (uint8_t[]){0xFF}, 1, 0},
 };
+
+/*
+ * The SH8601 panel resets on a low pulse.  Driving the pin here (instead of
+ * through esp_lcd_panel_reset) keeps the timing explicit.
+ */
+static void panel_hardware_reset(void)
+{
+    gpio_set_level(MOSU_PIN_LCD_RST, 0);
+    vTaskDelay(pdMS_TO_TICKS(20));
+    gpio_set_level(MOSU_PIN_LCD_RST, 1);
+    vTaskDelay(pdMS_TO_TICKS(150));
+    ESP_LOGI(TAG, "panel reset done");
+}
 
 static esp_err_t panel_create(void)
 {
@@ -81,11 +96,15 @@ static esp_err_t panel_create(void)
 
     ESP_RETURN_ON_ERROR(esp_lcd_new_panel_sh8601(s_io, &panel_cfg, &s_panel), TAG,
                         "panel");
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(s_panel), TAG, "reset");
+    ESP_LOGI(TAG, "panel object ready");
+    panel_hardware_reset();
+    ESP_LOGI(TAG, "panel reset done");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_init(s_panel), TAG, "init");
+    ESP_LOGI(TAG, "panel init done");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_set_gap(s_panel, MOSU_LCD_X_GAP, 0), TAG,
                         "gap");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(s_panel, true), TAG, "on");
+    ESP_LOGI(TAG, "panel on");
     return ESP_OK;
 }
 

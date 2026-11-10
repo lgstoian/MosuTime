@@ -223,6 +223,21 @@ static void screen_on(bool via_touch)
     s_screen_on = true;
     s_last_activity_ms = now_ms();
 
+    if (via_touch) {
+        /* LVGL is not running yet, so it cannot see the tap that woke the
+         * watch.  Count that tap here (zero movement, zero hold) so a second
+         * tap within the window is enough to ask for the time. */
+        mosu_touch_sample_t sample = {
+            .pressed = true,
+            .x = MOSU_LCD_W / 2,
+            .y = MOSU_LCD_H / 2,
+            .t_ms = s_last_activity_ms,
+        };
+        mosu_tap_update(&s_tap, &sample);
+        sample.pressed = false;
+        mosu_tap_update(&s_tap, &sample);
+    }
+
     ESP_LOGD(TAG, "screen on (%s)", via_touch ? "touch" : "motion");
 }
 
@@ -379,6 +394,7 @@ void app_main(void)
         s_display_lock = NULL;
     }
 
+    ESP_LOGI(TAG, "starting display");
     err = mosu_board_display_start();
     if (err == ESP_OK) {
         s_display_ok = true;
@@ -470,13 +486,16 @@ void app_main(void)
             poll_ms = 50u;
         }
 
+        bool touch_woke = false;
         if (s_touch_event) {
-            xSemaphoreTake(s_touch_event, pdMS_TO_TICKS(poll_ms));
+            touch_woke = xSemaphoreTake(s_touch_event, pdMS_TO_TICKS(poll_ms)) ==
+                         pdTRUE;
         } else {
             vTaskDelay(pdMS_TO_TICKS(poll_ms));
         }
 
-        if (s_cfg.display.wake_on_touch && mosu_board_touch_active()) {
+        if (s_cfg.display.wake_on_touch &&
+            (touch_woke || mosu_board_touch_active())) {
             screen_on(true);
             continue;
         }

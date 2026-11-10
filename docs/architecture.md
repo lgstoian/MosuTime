@@ -151,6 +151,28 @@ the RTC.
 | IMU missing | wrist raise unavailable; touch wake still works |
 | Panel missing | firmware keeps running, console available |
 
+## Testing
+
+Three layers, each catching a different class of mistake:
+
+1. **Host tests** (`test/host`) compile `mosu_core` and the INI parser with a
+   normal C compiler and check the formatting, phrase rules, battery curve,
+   tap/wrist state machines and config edge cases (184 checks). They are also
+   the fastest way to change a rule: no ESP-IDF, no board.
+2. **Desktop simulator** (`sim/`) renders the real layout constants and the
+   real seven-segment code into BMP files, so a visual change can be reviewed
+   without any hardware.
+3. **ESP32 emulator** (`tools/emu`) boots the merged firmware in esp-emu with
+   a virtual CO5300 panel and register-file models of the I2C parts. A panel
+   part claims the chip select, `--cosim-log` records the QSPI stream, and
+   `reconstruct.py` turns it back into a 410 x 502 PNG. That is the only one of
+   the three that exercises LVGL, the panel command sequence and the power
+   state machine together.
+
+The emulator build lives in `build-emu` with `tools/sdkconfig.emulator`, which
+disables light sleep and the SD mount (`CONFIG_MOSU_SKIP_SD`) because esp-emu
+does not model either. The production configuration is not affected.
+
 ## Porting to another board
 
 Only `components/mosu_board` mentions this hardware. A port must provide:

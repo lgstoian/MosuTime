@@ -26,6 +26,12 @@ bool mosu_time_valid(void);
 esp_err_t mosu_time_set_epoch(time_t utc);
 
 /*
+ * Set the clock without claiming that the network supplied it: used by the
+ * console's `settime`.  The Wi-Fi icon keeps showing the last real sync.
+ */
+esp_err_t mosu_time_set_epoch_manual(time_t utc);
+
+/*
  * Apply an IANA name ("Europe/Bucharest") or a POSIX TZ string.
  * IANA names are mapped to the POSIX form newlib understands.
  * The chosen zone is remembered in NVS.

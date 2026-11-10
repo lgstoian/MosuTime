@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "esp_log.h"
@@ -81,7 +82,7 @@ static void handle_line(char *line)
     }
 
     if (!strcmp(line, "help") || !strcmp(line, "?")) {
-        printf("commands: help status time sync say bright N vol N tap reboot\n");
+        printf("commands: help status time sync say settime bright vol tap reboot\n");
     } else if (!strcmp(line, "status")) {
         print_status();
     } else if (!strcmp(line, "time")) {
@@ -96,6 +97,35 @@ static void handle_line(char *line)
         printf("sync requested\n");
     } else if (!strcmp(line, "say")) {
         say_now();
+    } else if (!strncmp(line, "settime ", 8)) {
+        int year = 0;
+        int month = 0;
+        int day = 0;
+        int hour = 0;
+        int minute = 0;
+        if (sscanf(line + 8, "%d-%d-%d %d:%d", &year, &month, &day, &hour,
+                   &minute) != 5 ||
+            year < 2024 || month < 1 || month > 12 || day < 1 || day > 31 ||
+            hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+            printf("usage: settime YYYY-MM-DD HH:MM (local time)\n");
+            return;
+        }
+
+        struct tm local = {
+            .tm_year = year - 1900,
+            .tm_mon = month - 1,
+            .tm_mday = day,
+            .tm_hour = hour,
+            .tm_min = minute,
+            .tm_isdst = -1,
+        };
+        time_t epoch = mktime(&local);
+        if (epoch <= 0 || mosu_time_set_epoch_manual(epoch) != ESP_OK) {
+            printf("clock could not be set\n");
+            return;
+        }
+        printf("clock set to %04d-%02d-%02d %02d:%02d local\n", year, month,
+               day, hour, minute);
     } else if (!strcmp(line, "tap")) {
         mosu_ui_flash_tap();
     } else if (!strncmp(line, "bright ", 7)) {

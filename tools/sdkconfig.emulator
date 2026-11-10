@@ -1,0 +1,8 @@
+# Emulator build: the ESP32-S3 light sleep path in esp-emu is incomplete, and
+# the emulator has no SD card.  Keep the production configuration untouched;
+# this file is only used by tools/emu.sh.
+# CONFIG_PM_ENABLE is not set
+# CONFIG_FREERTOS_USE_TICKLESS_IDLE is not set
+CONFIG_ESP_TASK_WDT_PANIC=n
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=60
+CONFIG_MOSU_SKIP_SD=y
