@@ -20,6 +20,11 @@ are the firmware's output, not a re-implementation:
 | --- | --- | --- |
 | ![AM](../docs/emulator/am.png) | ![PM](../docs/emulator/pm.png) | ![unknown](../docs/emulator/unknown.png) |
 
+`board-low.json` sets the AXP2101 ADC to 3.5 V, which exercises the red
+battery bucket:
+
+![low battery](../docs/emulator/low-battery.png)
+
 ## What works, and what does not
 
 | Part | In esp-emu |

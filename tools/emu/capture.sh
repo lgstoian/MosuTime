@@ -65,6 +65,7 @@ run_case() {
 run_case am "$HERE/board.json"
 run_case pm "$HERE/board.json" --inject-on "console ready" --inject "settime 2026-11-10 21:41\n"
 run_case unknown "$HERE/board-unknown.json"
+run_case low-battery "$HERE/board-low.json"
 
 echo
-echo "wrote $OUT/am.png, $OUT/pm.png, $OUT/unknown.png"
+echo "wrote $OUT/am.png, $OUT/pm.png, $OUT/unknown.png, $OUT/low-battery.png"
