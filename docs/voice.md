@@ -3,8 +3,8 @@
 MosuTime has no audio in flash. Every announcement is assembled at runtime
 from small WAV files on the SD card, so the wording and the voice can change
 without rebuilding the firmware. `tools/gen_voice.py` renders all of them with
-[Piper](https://github.com/rhasspy/piper), and `tools/check_voice.py` verifies
-a folder before it is copied onto the card.
+a local ONNX voice, `tools/mosu_g2p.py` supplies the Romanian pronunciation,
+and `tools/check_voice.py` verifies a folder before it is copied onto the card.
 
 ## The 78 clips
 
@@ -35,7 +35,7 @@ and day in order, and the conjunction belongs to the second clip. That is why
 | `h_11.wav` | *Este ora unsprezece* |
 | `h_12.wav` | *Este ora douăsprezece* |
 
-The hour clip has no closing period in the text given to Piper: the same file
+The hour clip has no closing period in the text given to the voice: the same file
 is played alone for an exact hour and in the middle of a sentence when a
 minute and a weekday follow. A statement contour is correct in both cases.
 
@@ -178,30 +178,47 @@ With `announce_day = false` the weekday clip is simply skipped.
 ## Generating the clips
 
 ```sh
-pip install piper-tts
+pip install onnxruntime
 python tools/gen_voice.py --out sd_card/voice
 ```
 
 The first run downloads the `ro_RO-mihai-medium` voice (63 MB) and its config
 into `tools/piper-models/`. That folder and the generated WAVs are ignored by
-git. Rendering all 78 clips takes several minutes on a laptop: every clip
-starts a fresh Piper process, which reloads the model each time.
+git. The voice is run in-process with `onnxruntime`, so all 78 clips are
+rendered in well under a minute; there is no per-clip process start.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--out` | `sd_card/voice` | output folder |
 | `--models` | `tools/piper-models` | where the voice is cached |
-| `--piper` | auto | path to a `piper` executable |
-| `--length-scale` | `1.08` | Piper speaking rate; higher is slower |
+| `--length-scale` | `1.08` | speaking rate; higher is slower |
 | `--clip-gap-ms` | `60` | gap used when building the preview |
 | `--preview` | off | also write `<out>/preview.wav` |
 | `--force` | off | re-render clips that already exist |
-| `--dry-run` | off | print the 78 phrases and exit |
+| `--dry-run` | off | print the 78 phrases and their phonemes, then exit |
 
-`--length-scale` is 8 % slower than Piper's default. For an elderly listener
-the extra length helps more than it hurts; lower it towards `1.0` if the
-result drags. Both Piper command-line styles are supported (`--length_scale`
-for Piper 1.2 and `--length-scale` for `piper1-gpl`).
+`--length-scale` is 8 % slower than the voice's default. For an elderly
+listener the extra length helps more than it hurts; lower it towards `1.0` if
+the result drags.
+
+### Pronunciation
+
+The voice does not read letters, it reads IPA phonemes, and it is sensitive to
+the exact spelling: `trei` is `tɾeɪ` in this voice's convention, and rewriting
+it as textbook `tɾej` makes the model babble. That pronunciation lives in
+[`tools/mosu_g2p.py`](../tools/mosu_g2p.py) as a lexicon of the 38 distinct
+words used by the 78 clips, plus one context rule: `și` becomes `ʃiʲ` before a
+word that starts with a vowel (*și un minut*, *și opt minute*).
+
+A word outside the lexicon is a hard error, not a guess: `gen_voice.py` stops
+before rendering anything and tells you which word is missing. To add a phrase,
+add its words to `LEXICON` and run `python tools/mosu_g2p.py --selftest`.
+`gen_voice.py` also checks every phoneme against the voice's `phoneme_id_map`,
+so a symbol the voice cannot pronounce fails the run instead of producing a
+silent wrong clip.
+
+The lexicon is data, not code, and it is the reason the render path needs no
+espeak-ng and no GPL package.
 
 After each render the clip is post-processed in pure Python, without external
 tools:
@@ -216,7 +233,7 @@ in the middle of a waveform starts and ends with a step that is heard as a
 click. The output is always mono 16-bit at 22050 Hz, the native rate of this
 voice.
 
-Trimming also makes the pauses predictable. Piper leaves a variable amount of
+Trimming also makes the pauses predictable. The voice leaves a variable amount of
 silence after each sentence, and the firmware adds exactly `clip_gap_ms`
 between clips, so the old untrimmed files produced uneven gaps.
 
@@ -245,13 +262,20 @@ silent (peak below -60 dBFS). A sample rate other than 22050 Hz is a warning;
 a rate outside the 8000 - 48000 Hz range that the firmware accepts is an
 error.
 
+It also compares each clip's duration with the phrase that clip is supposed to
+say, using the phoneme count from `mosu_g2p`. A clip more than 2.5x longer than
+its own text is speaking extra words and fails with `extra words?`; between
+1.5x and 2.5x it is a warning, because a hand recording may simply be slower.
+This is the check that catches watermarked or stale audio before it reaches the
+card.
+
 ```
 sd_card/voice: 78 clips expected, 78 found
 name       dur s peak dBFS rms dBFS   rate  note
-h_1.wav     1.06      -3.0    -18.6  22050
+h_1.wav     1.03      -3.0    -18.7  22050
 ...
 groups: h 12/12, m 59/59, d 7/7
-total 285.54 s, peak -3.0..-3.0 dBFS, rms -20.9..-16.4 dBFS
+total 114.50 s, peak -3.0..-3.0 dBFS, rms -21.4..-14.9 dBFS
 rates: 22050
 OK: 78 clips, mono 16-bit, 22050 Hz
 ```
@@ -270,27 +294,33 @@ the right names works:
 4. run `python tools/check_voice.py <folder>`;
 5. copy the folder to the card and point `voice_dir` in `[announce]` at it.
 
-To keep Piper but change its sound, edit `VOICE_URL` and `VOICE_NAME` in
-`tools/gen_voice.py` for another voice from
+To change the sound, edit `VOICE_URL` and `VOICE_NAME` in `tools/gen_voice.py`
+for another ONNX voice from
 [rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices) and delete
-`tools/piper-models/` so the new model is fetched. A Romanian voice is needed
-for these texts; other languages would need the phrases translated as well.
+`tools/piper-models/` so the new model is fetched. The lexicon in
+`tools/mosu_g2p.py` is written for the `ro_RO-mihai-medium` phoneme
+conventions, so a different voice needs its pronunciation re-checked with
+`--dry-run` and a listening pass. A Romanian voice is needed for these texts;
+other languages would need the phrases translated as well.
 
 The directory may contain other files, including `preview.wav`; the firmware
 opens only the names it builds.
 
 ## Licences
 
-* The original [rhasspy/piper](https://github.com/rhasspy/piper) code is MIT.
-  The `piper-tts` package installed by pip today is
-  [piper1-gpl](https://github.com/OHF-voice/piper1-gpl), which is
-  GPL-3.0-or-later because it carries espeak-ng for phonemisation. That
-  licence covers the tool, which runs on the developer's machine; nothing from
-  it is linked into the firmware.
-* The voices in `rhasspy/piper-voices` are MIT. Each voice directory has a
-  `MODEL_CARD` describing the dataset it was trained on - `ro_RO-mihai-medium`
-  was trained on the Romanian *mihai* dataset - so read that card before
-  redistributing the generated audio.
+* MosuTime is MIT, and so is the render path: `tools/gen_voice.py`,
+  `tools/mosu_g2p.py` and `tools/check_voice.py` are part of this repository,
+  and they run on [onnxruntime](https://github.com/microsoft/onnxruntime),
+  which is MIT.
+* **No GPL code is used.** The earlier `pip install piper-tts` route installed
+  [piper1-gpl](https://github.com/OHF-voice/piper1-gpl), GPL-3.0-or-later,
+  because it carries espeak-ng for phonemisation. That dependency has been
+  removed: the pronunciation now comes from this repository's own lexicon, so
+  neither the repository nor the documented workflow contains GPL code.
+* The voice `ro_RO-mihai-medium` ships with a `MODEL_CARD`; it records a CC0
+  dataset (the Romanian *mihai* set) and asks for Piper 1.5 or newer. Read that
+  card before redistributing the generated audio. The weights are downloaded to
+  `tools/piper-models/`, which is ignored by git, and are never committed.
 * The generated WAV files are not committed to this repository. They are
   produced locally by `tools/gen_voice.py`.
 * If you replace the voice with a recording of a real person, you need that

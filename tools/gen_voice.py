@@ -11,39 +11,41 @@ card and joins them at runtime:
     m_30.wav "și treizeci de minute." (minute, 1..59)
     d_1.wav  "Marți."                (weekday, 0=Monday .. 6=Sunday)
 
-This script downloads a free Piper voice and renders every clip.  Each clip
-is post-processed in pure Python: leading and trailing silence is trimmed,
-the result is peak-normalised to -3 dBFS and gets a 10 ms fade at both ends,
-so the firmware can join clips without audible steps.
-
-Piper is MIT licensed, and the voices in rhasspy/piper-voices are free to
-use; see THIRD_PARTY_NOTICES.md and docs/voice.md.
+The clip is rendered by running the CC0 `ro_RO-mihai-medium` ONNX voice with
+onnxruntime, which is MIT.  The phonemes come from `tools/mosu_g2p.py`, a
+plain lexicon for this closed vocabulary, so no GPL phonemiser (espeak-ng and
+the packages that wrap it) is used at any point.  Each clip is then
+post-processed in pure Python: leading and trailing silence is trimmed, the
+result is peak-normalised to -3 dBFS and gets a 10 ms fade at both ends, so
+the firmware can join clips without audible steps.
 
 Usage
 -----
-    pip install piper-tts
+    pip install onnxruntime
     python tools/gen_voice.py --out sd_card/voice
 
     # Also render sd_card/voice/preview.wav with a few announcements:
     python tools/gen_voice.py --out sd_card/voice --preview
 
-    # Only show what would be generated:
+    # Only show what would be generated, with the phonemes:
     python tools/gen_voice.py --dry-run
 
-The script also accepts a standalone Piper executable with --piper.
+    # Replace clips that already exist:
+    python tools/gen_voice.py --out sd_card/voice --force
 """
 
 from __future__ import annotations
 
 import argparse
 import array
+import json
 import math
-import shutil
-import subprocess
 import sys
 import urllib.request
 import wave
 from pathlib import Path
+
+import mosu_g2p
 
 VOICE_URL = (
     "https://huggingface.co/rhasspy/piper-voices/resolve/main/ro/ro_RO/mihai/"
@@ -195,65 +197,52 @@ def download(url: str, destination: Path) -> None:
     tmp.replace(destination)
 
 
-def find_piper(explicit: str | None):
-    """
-    Return (argv, modern_flags) for the Piper CLI, or (None, False).
+class Voice:
+    """The ONNX voice plus the phoneme map it was trained with."""
 
-    Piper 1.2 uses --output_file / --length_scale; the newer piper1-gpl
-    package uses --output-file / --length-scale.  Both read the sentence from
-    standard input.
-    """
-    candidates = []
-    if explicit:
-        candidates.append([explicit])
-    exe = shutil.which("piper")
-    if exe:
-        candidates.append([exe])
-    candidates.append([sys.executable, "-m", "piper"])
+    def __init__(self, model: Path):
+        import onnxruntime as ort
 
-    for argv in candidates:
-        try:
-            help_run = subprocess.run(
-                argv + ["--help"], capture_output=True, text=True, timeout=30
-            )
-        except (OSError, subprocess.SubprocessError):
-            continue
-        help_text = help_run.stdout + help_run.stderr
-        if help_run.returncode != 0:
-            continue
-        if "--output_file" in help_text:
-            return argv, False
-        if "--output-file" in help_text:
-            return argv, True
-    return None, False
+        config_path = Path(str(model) + ".json")
+        with open(config_path, encoding="utf-8") as handle:
+            config = json.load(handle)
 
+        # Every id in the shipped config is a one-element list.
+        self.phoneme_ids = {
+            symbol: (value[0] if isinstance(value, list) else value)
+            for symbol, value in config["phoneme_id_map"].items()
+        }
+        self.sample_rate = int(config["audio"]["sample_rate"])
+        inference = config["inference"]
+        self.noise_scale = float(inference["noise_scale"])
+        self.noise_w = float(inference["noise_w"])
+        self.session = ort.InferenceSession(str(model),
+                                            providers=["CPUExecutionProvider"])
 
-def synthesise(argv, modern_flags: bool, model: Path, text: str,
-               destination: Path, length_scale: float) -> None:
-    scale = f"{length_scale:.2f}"
-    if modern_flags:
-        command = argv + [
-            "--model",
-            str(model),
-            "--output-file",
-            str(destination),
-            "--length-scale",
-            scale,
-            "--sentence-silence",
-            "0.05",
-        ]
-    else:
-        command = argv + [
-            "--model",
-            str(model),
-            "--output_file",
-            str(destination),
-            "--length_scale",
-            scale,
-            "--sentence_silence",
-            "0.05",
-        ]
-    subprocess.run(command, input=(text + "\n").encode("utf-8"), check=True)
+    def missing_symbols(self, phonemes: str) -> list[str]:
+        """Symbols the voice cannot pronounce.  Empty means the string is safe."""
+        return sorted({symbol for symbol in phonemes
+                       if symbol not in self.phoneme_ids})
+
+    def synthesise(self, phonemes: str, length_scale: float):
+        """Return the rendered audio as a list of float samples in -1..1."""
+        import numpy as np
+
+        ids = [self.phoneme_ids["^"]]
+        for symbol in phonemes:
+            ids.append(self.phoneme_ids["_"])
+            ids.append(self.phoneme_ids[symbol])
+        ids.append(self.phoneme_ids["$"])
+
+        inputs = {
+            "input": np.array([ids], dtype=np.int64),
+            "input_lengths": np.array([len(ids)], dtype=np.int64),
+            "scales": np.array(
+                [self.noise_scale, length_scale, self.noise_w], dtype=np.float32
+            ),
+        }
+        audio = self.session.run(None, inputs)[0].reshape(-1)
+        return np.clip(audio, -1.0, 1.0)
 
 
 def dbfs_to_peak(dbfs: float) -> int:
@@ -453,12 +442,10 @@ def main() -> int:
     parser.add_argument("--out", default="sd_card/voice",
                         help="output folder (default: sd_card/voice)")
     parser.add_argument("--models", default="tools/piper-models",
-                        help="where the Piper voice is cached")
-    parser.add_argument("--piper", default=None,
-                        help="path to a piper executable")
+                        help="where the ONNX voice is cached")
     parser.add_argument("--length-scale", type=float,
                         default=DEFAULT_LENGTH_SCALE,
-                        help="Piper speed: higher is slower "
+                        help="speaking rate: higher is slower "
                              f"(default: {DEFAULT_LENGTH_SCALE})")
     parser.add_argument("--clip-gap-ms", type=int, default=DEFAULT_CLIP_GAP_MS,
                         help="silence between preview clips, in ms "
@@ -467,7 +454,8 @@ def main() -> int:
                         help="also write <out>/preview.wav with a few "
                              "complete announcements")
     parser.add_argument("--dry-run", action="store_true",
-                        help="print the clips without synthesising them")
+                        help="print the clips and their phonemes without "
+                             "synthesising them")
     parser.add_argument("--force", action="store_true",
                         help="regenerate clips that already exist")
     args = parser.parse_args()
@@ -483,29 +471,38 @@ def main() -> int:
     models = Path(args.models)
     plan = clip_plan()
 
+    # Fail before rendering anything if a phrase is not covered by the lexicon
+    # or needs a symbol this voice does not have.
+    phonemes = {}
+    for name, text in plan:
+        try:
+            phonemes[name] = mosu_g2p.phonemize(text)
+        except KeyError as error:
+            print(f"{name}: {error}", file=sys.stderr)
+            print("add the word to LEXICON in tools/mosu_g2p.py", file=sys.stderr)
+            return 2
+
     if args.dry_run:
         for name, text in plan:
-            print(f"{name:10s} {text}")
+            print(f"{name:10s} {text:44s} {phonemes[name]}")
         print(f"\n{len(plan)} clips")
         return 0
+
     out.mkdir(parents=True, exist_ok=True)
 
     model = models / f"{VOICE_NAME}.onnx"
-    config = models / f"{VOICE_NAME}.onnx.json"
     download(VOICE_URL, model)
-    download(VOICE_CONFIG_URL, config)
+    download(VOICE_CONFIG_URL, models / f"{VOICE_NAME}.onnx.json")
 
-    argv, modern_flags = find_piper(args.piper)
-    if argv is None:
-        print(
-            "Piper was not found.\n"
-            "  pip install piper-tts\n"
-            "or pass --piper C:\\path\\to\\piper.exe",
-            file=sys.stderr,
-        )
-        return 2
+    voice = Voice(model)
+    for name, phoneme_string in phonemes.items():
+        missing = voice.missing_symbols(phoneme_string)
+        if missing:
+            print(f"{name}: the voice has no phoneme for {missing}",
+                  file=sys.stderr)
+            return 2
 
-    print(f"using {' '.join(argv)}")
+    print(f"voice {VOICE_NAME} at {voice.sample_rate} Hz, onnxruntime")
     print(f"length-scale {args.length_scale:.2f}, trim {TRIM_THRESHOLD_DBFS:g} "
           f"dBFS, peak {PEAK_TARGET_DBFS:g} dBFS, fade {FADE_MS:g} ms")
     made = 0
@@ -514,8 +511,10 @@ def main() -> int:
         destination = out / name
         if destination.exists() and not args.force:
             continue
-        synthesise(argv, modern_flags, model, text, destination,
-                   args.length_scale)
+        audio = voice.synthesise(phonemes[name], args.length_scale)
+        samples = array.array("h")
+        samples.extend(int(round(sample * FULL_SCALE)) for sample in audio)
+        write_mono(destination, voice.sample_rate, samples)
         info = postprocess(destination)
         made += 1
         spoken += info["duration"]

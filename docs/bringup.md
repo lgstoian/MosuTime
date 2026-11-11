@@ -208,8 +208,9 @@ of `say`/`vol` produces a reboot.
 3. Generate the voice on the PC:
 
    ```sh
-   pip install piper-tts
+   pip install onnxruntime
    python tools/gen_voice.py --out sd_card/voice
+   python tools/check_voice.py sd_card/voice
    ```
 
    Expect 78 clips (12 hours, 59 minutes, 7 weekdays), each mono 16-bit WAV.

@@ -27,6 +27,7 @@ changed to make the emulator work.
 | 8 | Session/tap race across LVGL and app tasks | yes | yes: double tap at the timeout boundary |
 | 9 | Emulator rc2 I2C port shadowing | yes (emulator only) | n/a: no production impact |
 | 10 | One failed sync left the clock stale for hours | yes | yes: pull the router for two minutes and watch the retries |
+| 11 | Every voice clip said "marcă comercială" | yes | yes: listen to `preview.wav` on the watch |
 
 ## 1. SD mount blocking boot
 
@@ -315,6 +316,45 @@ because the URL is wrong. The radio is still switched off between attempts.
 **Verification.** `test/host/test_policy.c` covers the schedule and the reset.
 The emulator has no configured AP, so the real association/backoff path is part
 of the Wi-Fi step in the bring-up checklist.
+
+## 11. Every voice clip said "marcă comercială"
+
+**Symptom.** Every announcement carried a spoken phrase that listeners heard as
+"commercial mark". The words of the announcement were still there, buried after
+it, so the clock *worked* and only sounded wrong. The hour and weekday clips
+were also much shorter than the script in the tree produces.
+
+**Cause.** The WAV files on the SD card were not produced by
+`tools/gen_voice.py`. They were watermarked audio from a third-party service:
+word timestamps show `m_7.wav` speaking *"e grav marca comerciale, e grav marca
+comercială"* for the first 3.20 s and only then *"…șapte minute"*, and
+`m_30.wav` carrying 1.8 s of the same notice. The durations gave it away — the
+file was 3.98 s where the phrase it claims to say renders in 1.46 s — but
+nothing in the repository checked that, so the folder was copied to the card
+anyway.
+
+The render pipeline itself was fine. Re-running it on the same voice produced
+intelligible Romanian, which is how the folder and the tool were told apart.
+
+**Fix.** The folder is regenerated from `tools/gen_voice.py`, and
+`tools/check_voice.py` now compares each clip's duration with the phoneme count
+of the phrase it is supposed to say (`0.289 s + 0.043 s` per phoneme). A clip
+more than 2.5x longer than its own text fails with *"extra words?"*; the
+watermarked set fails 43 clips, the current one passes with every clip between
+0.66x and 1.21x.
+
+The same pass removed the GPL render dependency: `piper-tts` is
+`piper1-gpl`, GPL-3.0-or-later, so the pronunciation now comes from the MIT
+lexicon in `tools/mosu_g2p.py` and the voice runs under onnxruntime (MIT).
+
+**Fix lives in.** [`tools/check_voice.py`](../tools/check_voice.py)
+(`expected_durations`, `check`), [`tools/gen_voice.py`](../tools/gen_voice.py),
+[`tools/mosu_g2p.py`](../tools/mosu_g2p.py).
+
+**Verification.** `check_voice.py` fails the old folder and passes the new one;
+the ASR of the regenerated `preview.wav` returns *"Este ora două și treizeci de
+minute. Marți…"*. A native listening check on the watch is still required — an
+ASR is not a Romanian ear, and the emulator cannot hear audio at all.
 
 ## Adding a finding
 

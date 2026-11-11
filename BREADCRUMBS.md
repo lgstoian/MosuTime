@@ -37,7 +37,8 @@ For the product constraints and the rules of the road, read
 | Reproduce a touch or wrist gesture in the emulator | [`tools/emu/smoke.sh`](tools/emu/smoke.sh), [`tools/emu/board-interactive.json`](tools/emu/board-interactive.json) |
 | Capture the real firmware's face as a PNG | [`tools/emu/capture.sh`](tools/emu/capture.sh), [`tools/emu/reconstruct.py`](tools/emu/reconstruct.py) |
 | Capture the real watch's face on hardware | `screenshot /sdcard/shot.bmp` on the console, [`components/mosu_ui/src/mosu_ui.c`](components/mosu_ui/src/mosu_ui.c) (`mosu_ui_snapshot`) |
-| Generate or validate the Romanian voice clips | [`tools/gen_voice.py`](tools/gen_voice.py), [`tools/check_voice.py`](tools/check_voice.py), [`docs/voice.md`](docs/voice.md) |
+| Generate or validate the Romanian voice clips | [`tools/gen_voice.py`](tools/gen_voice.py), [`tools/mosu_g2p.py`](tools/mosu_g2p.py), [`tools/check_voice.py`](tools/check_voice.py), [`docs/voice.md`](docs/voice.md) |
+| Change how a word is pronounced | [`tools/mosu_g2p.py`](tools/mosu_g2p.py) (`LEXICON`), then `--selftest` |
 | Estimate battery life or record a measurement | [`tools/power_budget.py`](tools/power_budget.py), [`docs/power.md`](docs/power.md) |
 | Check accessibility, contrast or physical digit size | [`tools/contact_sheet.py`](tools/contact_sheet.py), [`docs/accessibility/README.md`](docs/accessibility/README.md) |
 | Give the watch to the family / explain it in Romanian | [`docs/family-ro.md`](docs/family-ro.md) |
@@ -87,8 +88,9 @@ replaces [`docs/bringup.md`](docs/bringup.md).
 | Tool | What it does |
 | --- | --- |
 | [`tools/build.ps1`](tools/build.ps1) | Windows wrapper that sources ESP-IDF, builds, and optionally flashes/monitors. |
-| [`tools/gen_voice.py`](tools/gen_voice.py) | Downloads the free Romanian Piper voice and renders the 78 WAV clips into `sd_card/voice` (or `--out`). Trims silence, normalises, checks the format. |
-| [`tools/check_voice.py`](tools/check_voice.py) | Verifies a voice folder: exact names, mono 16-bit WAV, no clipping, no silent clips; `--preview` builds one review sentence. |
+| [`tools/gen_voice.py`](tools/gen_voice.py) | Runs the Romanian ONNX voice with onnxruntime and renders the 78 WAV clips into `sd_card/voice` (or `--out`). Trims silence, normalises, fades; `--preview` joins four announcements for a listening check. No GPL tool involved. |
+| [`tools/mosu_g2p.py`](tools/mosu_g2p.py) | Romanian pronunciation: a 38-word IPA lexicon plus the `și` sandhi rule. `--selftest` checks the rules, `--plan` prints all 78 phrases with their phonemes. |
+| [`tools/check_voice.py`](tools/check_voice.py) | Verifies a voice folder: exact names, mono 16-bit WAV, no clipping, no silent clips, and a duration that matches the phrase each clip says. |
 | [`tools/power_budget.py`](tools/power_budget.py) | First-order current/runtime model. Reads the shipped config and lets every current be overridden with a flag. |
 | [`tools/contact_sheet.py`](tools/contact_sheet.py) | Drives the simulator, builds the 16-scene accessibility sheet and regenerates `docs/accessibility/README.md` / `hours.png`. |
 | [`tools/emu/capture.sh`](tools/emu/capture.sh) | Emulator capture cases: AM, PM with `settime`, unknown time, low battery. |
@@ -116,7 +118,7 @@ replaces [`docs/bringup.md`](docs/bringup.md).
 | [`docs/accessibility/README.md`](docs/accessibility/README.md) | Physical size math, viewing distance, contrast and the generated contact sheet. |
 | [`docs/findings.md`](docs/findings.md) | Engineering log of issues found during emulator/desk testing, with symptom, cause, fix and file. |
 | [`tools/emu/README.md`](tools/emu/README.md) | esp-emu setup, interactive parts, capture/smoke, what is and is not modelled. |
-| [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) | Licences for Espressif components, LVGL, Piper voices and other third-party work. |
+| [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) | Licences for Espressif components, LVGL, onnxruntime, the voice model and other third-party work. |
 
 ## Conventions and gotchas
 

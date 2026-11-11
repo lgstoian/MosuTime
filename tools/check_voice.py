@@ -10,6 +10,9 @@ The firmware plays the clips from the SD card, so it needs:
   * mono, 16-bit WAV at 22050 Hz (other rates are played but warned about)
   * no clipping (the loudest sample must stay below full scale)
   * no silent or empty clip
+  * a duration that matches the phrase the clip is supposed to say, so a
+    file that speaks extra words (a watermark, a stale render from another
+    tool) is caught instead of shipped
 
 The checker prints one line per clip with duration, peak and RMS, and exits
 with status 1 when anything is missing or unusable.
@@ -34,6 +37,16 @@ MAX_RATE = 48000
 FULL_SCALE = 32767.0
 CLIP_PEAK = 32767   # reaching full scale means the render clipped
 SILENT_DBFS = -60.0
+
+# Expected speech length for a clip, calibrated on a known-good render:
+# about 0.29 s of lead-in plus 0.043 s per phoneme.  A clip far longer than
+# its own text is saying extra words - a watermark, a stale file from another
+# tool - and a clip far shorter has lost part of the sentence.
+DURATION_BASE_S = 0.289
+DURATION_PER_SYMBOL_S = 0.0430
+DURATION_WARN = 1.5
+DURATION_FAIL = 2.5
+DURATION_SHORT = 0.5
 
 # A directory may also hold the optional preview rendered by gen_voice.py.
 ALLOWED_EXTRA = {"preview.wav"}
@@ -101,7 +114,26 @@ def analyse(path: Path) -> dict:
     return stats
 
 
-def check(path: Path) -> tuple[dict, list[str], list[str]]:
+def expected_durations() -> dict:
+    """Expected seconds per clip, from the phonemes of the phrase it speaks."""
+    try:
+        import gen_voice
+        import mosu_g2p
+    except ImportError:
+        return {}
+
+    durations = {}
+    for name, text in gen_voice.clip_plan():
+        try:
+            phonemes = mosu_g2p.phonemize(text)
+        except KeyError:
+            continue
+        durations[name] = DURATION_BASE_S + DURATION_PER_SYMBOL_S * len(phonemes)
+    return durations
+
+
+def check(path: Path,
+          expected_s: float | None = None) -> tuple[dict, list[str], list[str]]:
     """Return (stats, problems, warnings) for one clip."""
     stats = analyse(path)
     if "error" in stats:
@@ -127,6 +159,17 @@ def check(path: Path) -> tuple[dict, list[str], list[str]]:
             problems.append(f"clipped at {stats['peak']}")
         elif stats["peak_db"] < SILENT_DBFS:
             problems.append(f"silent, peak {stats['peak']}")
+
+    if expected_s and stats["duration"] > 0:
+        ratio = stats["duration"] / expected_s
+        if ratio > DURATION_FAIL:
+            problems.append(
+                f"{ratio:.1f}x longer than its text "
+                f"({expected_s:.2f} s): extra words?")
+        elif ratio > DURATION_WARN:
+            warnings.append(f"{ratio:.1f}x longer than its text")
+        elif ratio < DURATION_SHORT:
+            warnings.append(f"only {ratio:.1f}x its text length, truncated?")
 
     return stats, problems, warnings
 
@@ -160,6 +203,7 @@ def main() -> int:
 
     expected = expected_names()
     expected_set = set(expected)
+    durations = expected_durations()
     found = {path.name for path in folder.glob("*.wav")
              if path.is_file()}
 
@@ -183,7 +227,7 @@ def main() -> int:
             print(f"{name:9s} {'-':>6s} {'-':>9s} {'-':>8s} {'-':>6s}  MISSING")
             continue
 
-        stats, clip_problems, warnings = check(folder / name)
+        stats, clip_problems, warnings = check(folder / name, durations.get(name))
         if "error" in stats:
             print(f"{name:9s} {'-':>6s} {'-':>9s} {'-':>8s} {'-':>6s}  INVALID")
             for problem in clip_problems:

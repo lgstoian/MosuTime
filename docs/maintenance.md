@@ -131,13 +131,14 @@ in `timezone`.
 
 ## 4. Regenerate the voice
 
-The clips are generated on a PC with Piper and copied to the card; nothing is
-embedded in the firmware. The text and the grammar live in
-[`tools/gen_voice.py`](../tools/gen_voice.py).
+The clips are generated on a PC with a local ONNX voice and copied to the card;
+nothing is embedded in the firmware. The text and the grammar live in
+[`tools/gen_voice.py`](../tools/gen_voice.py), the Romanian pronunciation in
+[`tools/mosu_g2p.py`](../tools/mosu_g2p.py).
 
 ```sh
-pip install piper-tts
-python tools/gen_voice.py --dry-run          # show the 78 clips and the text
+pip install onnxruntime
+python tools/gen_voice.py --dry-run          # show the 78 clips and phonemes
 python tools/gen_voice.py --out sd_card/voice
 ```
 
@@ -145,9 +146,7 @@ Useful flags:
 
 * `--force` regenerates clips that already exist. Without it, existing files
   are skipped, which is how you keep a partly hand-edited set.
-* `--piper C:\path\to\piper.exe` uses a standalone Piper instead of the Python
-  package.
-* `--models` changes where the `ro_RO-mihai-medium` model is cached
+* `--models` changes where the `ro_RO-mihai-medium` voice is cached
   (default `tools/piper-models`).
 * `--preview` also writes `preview.wav` with four complete announcements, so
   the result can be checked on a PC. The watch never plays that file.
@@ -159,11 +158,18 @@ checks that every file is mono 16-bit WAV. The player accepts 8–48 kHz mono
 
 To change the wording, edit `HOURS`, `minute_text()` or `DAYS` in
 `tools/gen_voice.py` and regenerate. Keep the file names identical
-(`h_1.wav` … `d_6.wav`); the firmware builds the path from the time.
+(`h_1.wav` … `d_6.wav`); the firmware builds the path from the time. A new word
+also needs an entry in `LEXICON` in `tools/mosu_g2p.py`, otherwise the render
+stops with the missing word instead of guessing its pronunciation.
 
 Copy the whole `voice/` folder to the card, overwriting the old one. A missing
 clip is not fatal: that fragment is silent and the rest of the sentence still
 plays.
+
+`python tools/check_voice.py sd_card/voice` compares each clip's duration with
+the phrase it is supposed to say. A clip that is much longer than its own text
+is speaking extra words (a watermark or a stale file from another tool) and
+fails the check; run it before every copy to the card.
 
 ## 5. Update the firmware over USB
 

@@ -21,6 +21,11 @@ jobs:
       - name: Compile the Python tools
         run: python -m compileall -q tools
 
+      # The pronunciation lexicon is what keeps a clip from saying the wrong
+      # word, and it needs no model to check.
+      - name: Check the pronunciation lexicon
+        run: python tools/mosu_g2p.py --selftest
+
       - name: Configure and run the host tests
         run: |
           cmake -S test/host -B test/host/build -DCMAKE_BUILD_TYPE=Debug

@@ -23,18 +23,28 @@ by the component manager in `dependencies.lock` when the project is configured.
 
 ## Voice
 
-The announcement clips are generated locally from
-[Piper](https://github.com/rhasspy/piper) and the
+The announcement clips are generated locally by `tools/gen_voice.py`, which runs
+the
 [`ro_RO-mihai-medium`](https://huggingface.co/rhasspy/piper-voices/tree/main/ro/ro_RO/mihai/medium)
-voice from `rhasspy/piper-voices`.
+voice from `rhasspy/piper-voices` through
+[onnxruntime](https://github.com/microsoft/onnxruntime).
 
-* Piper is MIT licensed.
-* The `rhasspy/piper-voices` repository is distributed under the MIT licence;
-  each voice directory has a `MODEL_CARD` with the details of the dataset it
-  was trained on. Check that card before redistributing the generated audio.
-* The generated WAV files are not part of this repository. They are created on
-  the user's machine by `tools/gen_voice.py`, which downloads the model from
-  Hugging Face at that time.
+| Component | Licence | Used at |
+| --- | --- | --- |
+| `onnxruntime` | MIT | render time, on the developer's machine |
+| `ro_RO-mihai-medium` ONNX voice | model card records a CC0 dataset | render time; the weights are downloaded, never committed |
+| `tools/mosu_g2p.py` | MIT (part of MosuTime) | render time |
+| Generated WAV files | not committed; see the voice's `MODEL_CARD` before redistributing | copied to the SD card |
+
+The voice is not phonemised by espeak-ng: `tools/mosu_g2p.py` carries the
+Romanian pronunciation for the 78 phrases as a plain lexicon, so the render
+path contains no GPL code and no GPL process. The earlier `piper-tts`
+(`piper1-gpl`, GPL-3.0-or-later) dependency has been removed for this reason.
+
+The generated WAV files are not part of this repository. They are created on
+the user's machine, which downloads the model from Hugging Face at that time.
+The `MODEL_CARD` in the voice directory is the authority on the dataset; it
+records CC0 for `ro_RO-mihai-medium`.
 
 If you replace the voice, keep the licence of the new model with the copy of
 MosuTime you distribute.
