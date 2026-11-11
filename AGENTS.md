@@ -90,6 +90,7 @@ Other useful commands:
 ```sh
 python tools/gen_voice.py --out sd_card/voice   # generate the 78 clips
 python tools/check_voice.py sd_card/voice       # verify a voice folder
+python tools/mosu_g2p.py --selftest             # check the pronunciation rules
 python tools/power_budget.py                    # first-order power model
 python tools/contact_sheet.py                   # docs/accessibility/hours.png
 ```

@@ -153,8 +153,9 @@ Useful flags:
 
 The script downloads the free Romanian `ro_RO-mihai-medium` voice on first
 run, renders 12 hour phrases, 59 minute phrases and 7 weekday phrases, and
-checks that every file is mono 16-bit WAV. The player accepts 8–48 kHz mono
+writes them as mono 16-bit WAV at 22050 Hz. The player accepts 8–48 kHz mono
 16-bit PCM; anything else is reported as `need mono 16 bit wav` and skipped.
+`check_voice.py` is the tool that validates a folder.
 
 To change the wording, edit `HOURS`, `minute_text()` or `DAYS` in
 `tools/gen_voice.py` and regenerate. Keep the file names identical

@@ -272,10 +272,10 @@ card.
 ```
 sd_card/voice: 78 clips expected, 78 found
 name       dur s peak dBFS rms dBFS   rate  note
-h_1.wav     1.03      -3.0    -18.7  22050
+h_1.wav     1.06      -3.0    -18.5  22050
 ...
 groups: h 12/12, m 59/59, d 7/7
-total 114.50 s, peak -3.0..-3.0 dBFS, rms -21.4..-14.9 dBFS
+total 114.29 s, peak -3.0..-3.0 dBFS, rms -20.7..-14.7 dBFS
 rates: 22050
 OK: 78 clips, mono 16-bit, 22050 Hz
 ```

@@ -341,7 +341,7 @@ intelligible Romanian, which is how the folder and the tool were told apart.
 of the phrase it is supposed to say (`0.289 s + 0.043 s` per phoneme). A clip
 more than 2.5x longer than its own text fails with *"extra words?"*; the
 watermarked set fails 43 clips, the current one passes with every clip between
-0.66x and 1.21x.
+0.71x and 1.21x.
 
 The same pass removed the GPL render dependency: `piper-tts` is
 `piper1-gpl`, GPL-3.0-or-later, so the pronunciation now comes from the MIT
