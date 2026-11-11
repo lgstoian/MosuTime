@@ -134,11 +134,12 @@ python tools/gen_voice.py --out sd_card/voice
 ```
 
 The script downloads the voice into `tools/piper-models/`, renders all 78
-clips (12 hours, 59 minutes, 7 weekdays), trims silence, normalises each clip
-to -3 dBFS, and checks that each file is mono 16-bit WAV. Nothing is embedded
-in the firmware, so the voice and the wording can be replaced by copying new
-files onto the card. A second script, `tools/check_voice.py`, verifies the
-whole set, and `--preview` writes one combined sentence for a family review.
+clips (12 hours, 59 minutes, 7 weekdays), trims silence and normalises each
+clip to -3 dBFS. Nothing is embedded in the firmware, so the voice and the
+wording can be replaced by copying new files onto the card. A second script,
+`tools/check_voice.py`, verifies the whole set (format, levels and a duration
+that matches the words), and `--preview` writes one combined sentence for a
+family review.
 
 Romanian grammar is handled in `tools/gen_voice.py`: *un minut*, *două
 minute*, *douăzeci de minute*, *douăzeci și una de minute*. The full phrase
