@@ -189,13 +189,18 @@ static void draw_test_grid(lv_layer_t *layer)
 static void draw_test_corners(lv_layer_t *layer)
 {
     const int32_t m = 20;
+    const int32_t inset = MOSU_SAFE_INSET;
 
     fill_rect(layer, 0, 0, MOSU_LCD_W, MOSU_LCD_H, 0, 0x000000, LV_OPA_COVER);
-    fill_rect(layer, 0, 0, m, m, 0, 0xFFFFFF, LV_OPA_COVER);
-    fill_rect(layer, MOSU_LCD_W - m, 0, m, m, 0, 0xFFFFFF, LV_OPA_COVER);
-    fill_rect(layer, 0, MOSU_LCD_H - m, m, m, 0, 0xFFFFFF, LV_OPA_COVER);
-    fill_rect(layer, MOSU_LCD_W - m, MOSU_LCD_H - m, m, m, 0, 0xFFFFFF,
+    /* The glass has rounded corners: place the squares in the visible area,
+     * not in the cut-out, or the test says nothing about the real corner. */
+    fill_rect(layer, inset, inset, m, m, 0, 0xFFFFFF, LV_OPA_COVER);
+    fill_rect(layer, MOSU_LCD_W - inset - m, inset, m, m, 0, 0xFFFFFF,
               LV_OPA_COVER);
+    fill_rect(layer, inset, MOSU_LCD_H - inset - m, m, m, 0, 0xFFFFFF,
+              LV_OPA_COVER);
+    fill_rect(layer, MOSU_LCD_W - inset - m, MOSU_LCD_H - inset - m, m, m,
+              0, 0xFFFFFF, LV_OPA_COVER);
 
     /* The cross must sit in the middle of the visible area, not 22 px to one
      * side: that is exactly the X gap the panel driver compensates for. */

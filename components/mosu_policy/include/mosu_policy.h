@@ -75,10 +75,11 @@ void mosu_policy_parse_geo(const char *body, mosu_policy_geo_t *out);
  *
  * fail_count is the number of consecutive failures so far, 0 after a success.
  * The first three failures retry after 5, 15 and 30 minutes; after that the
- * normal sync_hours interval takes over again.  sync_hours is clamped to at
- * least one hour so a bad config can never busy-loop the radio.
+ * normal interval takes over again.  sync_interval_s is clamped to at least
+ * one hour so a bad config can never busy-loop the radio.
  */
-uint32_t mosu_policy_next_sync_s(uint8_t fail_count, uint16_t sync_hours);
+uint32_t mosu_policy_next_sync_s(uint8_t fail_count,
+                                 uint32_t sync_interval_s);
 
 #ifdef __cplusplus
 }

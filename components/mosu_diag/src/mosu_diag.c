@@ -19,6 +19,7 @@
 
 #include "mosu_audio.h"
 #include "mosu_board.h"
+#include "mosu_config_store.h"
 #include "mosu_core/mosu_core.h"
 #include "mosu_diag.h"
 #include "mosu_net.h"
@@ -99,9 +100,11 @@ static void print_config(void)
            (unsigned)c->colors.wifi_idle, (unsigned)c->colors.wifi_ok,
            (unsigned)c->colors.wifi_fail, (unsigned)c->colors.tap_border);
 
-    printf("clock  : tz %s, auto %d, sync every %u h, wifi always %d\n",
-           c->clock.timezone, (int)c->clock.auto_timezone,
-           (unsigned)c->clock.sync_hours, (int)c->clock.wifi_always_on);
+    printf("clock  : tz %s, auto %d\n", c->clock.timezone,
+           (int)c->clock.auto_timezone);
+    printf("clock  : sync %u/day (0 = use sync_hours %u), wifi always %d\n",
+           (unsigned)c->clock.sync_per_day, (unsigned)c->clock.sync_hours,
+           (int)c->clock.wifi_always_on);
     printf("clock  : ntp %s / %s\n", c->clock.ntp1, c->clock.ntp2);
     printf("clock  : geo %s, manual '%s'\n", c->clock.geo_url,
            c->clock.manual_time);
@@ -190,6 +193,7 @@ static void handle_line(char *line)
         printf("  i2c pmu rtc imu pm heap tasks display config\n");
         printf("  test screen [colors|grid|corners|off]\n");
         printf("  test touch | test audio | sd remount\n");
+        printf("  wifi <ssid> <password> | scan | presence | clear | status\n");
         printf("  screenshot [path] | power screen on|off | power wifi |\n");
         printf("  power idle\n");
     } else if (!strcmp(line, "status")) {
@@ -285,6 +289,69 @@ static void handle_line(char *line)
         printf("  panel: %s, touch: %s\n", info.panel, info.touch);
     } else if (!strcmp(line, "config")) {
         print_config();
+    } else if (!strcmp(line, "wifi")) {
+        printf("usage: wifi <ssid> <password> | wifi clear | wifi status\n");
+    } else if (!strncmp(line, "wifi ", 5)) {
+        const char *arg = line + 5;
+        if (!strcmp(arg, "scan")) {
+            esp_err_t err = mosu_net_scan();
+            if (err != ESP_OK) {
+                printf("wifi scan: %s\n", esp_err_to_name(err));
+            }
+        } else if (!strcmp(arg, "presence")) {
+            printf("wifi: configured network %s\n",
+                   mosu_net_home_ap_visible() ? "visible" : "not visible");
+        } else if (!strcmp(arg, "status")) {
+            printf("wifi: %u network(s)\n", (unsigned)s_cfg->wifi_count);
+            for (uint8_t i = 0; i < s_cfg->wifi_count; i++) {
+                printf("      %u: %s\n", (unsigned)(i + 1), s_cfg->wifi[i].ssid);
+            }
+        } else if (!strcmp(arg, "clear")) {
+            memset(s_cfg->wifi, 0, sizeof(s_cfg->wifi));
+            s_cfg->wifi_count = 0;
+            mosu_net_clear_networks();
+            esp_err_t err = mosu_config_store_save(s_cfg);
+            printf("wifi: networks cleared, saved %s\n",
+                   err == ESP_OK ? "to NVS" : "FAILED");
+        } else {
+            /* The SSID ends at the first space; everything after it is the
+             * password, so a passphrase containing spaces still works. */
+            char work[96];
+            snprintf(work, sizeof(work), "%s", arg);
+            char *space = strchr(work, ' ');
+            if (!space) {
+                printf("usage: wifi <ssid> <password>\n");
+                return;
+            }
+            *space = '\0';
+            const char *ssid = work;
+            const char *pass = space + 1;
+            if (*ssid == '\0') {
+                printf("usage: wifi <ssid> <password>\n");
+                return;
+            }
+
+            esp_err_t err = mosu_net_set_network(ssid, pass);
+            if (err != ESP_OK) {
+                printf("wifi: rejected (%s)\n", esp_err_to_name(err));
+                return;
+            }
+
+            memset(s_cfg->wifi, 0, sizeof(s_cfg->wifi));
+            size_t ssid_len = strlen(ssid);
+            size_t pass_len = strlen(pass);
+            if (ssid_len < sizeof(s_cfg->wifi[0].ssid) &&
+                pass_len < sizeof(s_cfg->wifi[0].pass)) {
+                memcpy(s_cfg->wifi[0].ssid, ssid, ssid_len + 1);
+                memcpy(s_cfg->wifi[0].pass, pass, pass_len + 1);
+            }
+            s_cfg->wifi_count = 1;
+
+            err = mosu_config_store_save(s_cfg);
+            printf("wifi: network 1 = '%s', saved %s, sync requested\n", ssid,
+                   err == ESP_OK ? "to NVS" : "FAILED");
+            mosu_net_request_sync();
+        }
     } else if (!strcmp(line, "test screen")) {
         printf("usage: test screen [colors|grid|corners|off]\n");
     } else if (!strncmp(line, "test screen ", 12)) {

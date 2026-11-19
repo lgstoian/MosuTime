@@ -15,13 +15,41 @@ param(
     [switch]$Clean
 )
 
-$ErrorActionPreference = "Stop"
+# ESP-IDF and CMake write normal progress and warnings to stderr.  PowerShell
+# 5.1 turns that into a terminating NativeCommandError under "Stop", so this
+# wrapper keeps normal error handling and checks $LASTEXITCODE explicitly
+# after every native command instead.
+$ErrorActionPreference = "Continue"
 
 if (-not (Test-Path (Join-Path $IdfPath "export.ps1"))) {
     throw "ESP-IDF not found at '$IdfPath'. Pass -IdfPath <path to esp-idf>."
 }
 
 . (Join-Path $IdfPath "export.ps1")
+
+if (-not (Get-Command idf.py -ErrorAction SilentlyContinue)) {
+    throw "ESP-IDF environment did not provide idf.py."
+}
+
+# An espup/rustup Xtensa toolchain earlier in PATH shadows the one ESP-IDF
+# expects, and configure then fails the version check.  Put the IDF-managed
+# toolchain for the recommended version at the front.
+$toolsPath = if ($env:IDF_TOOLS_PATH) {
+    $env:IDF_TOOLS_PATH
+} else {
+    Join-Path $env:USERPROFILE ".espressif"
+}
+$toolsJson = Get-Content (Join-Path $IdfPath "tools\tools.json") -Raw |
+    ConvertFrom-Json
+$xtensaTool = $toolsJson.tools | Where-Object { $_.name -eq "xtensa-esp-elf" }
+$xtensaVersion =
+    ($xtensaTool.versions | Where-Object { $_.status -eq "recommended" }).name
+if ($xtensaVersion) {
+    $xtensaBin = Join-Path $toolsPath "tools\xtensa-esp-elf\$xtensaVersion\xtensa-esp-elf\bin"
+    if (Test-Path (Join-Path $xtensaBin "xtensa-esp32s3-elf-gcc.exe")) {
+        $env:PATH = "$xtensaBin;$env:PATH"
+    }
+}
 
 Push-Location (Join-Path $PSScriptRoot "..")
 try {

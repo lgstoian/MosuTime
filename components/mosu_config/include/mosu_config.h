@@ -73,6 +73,8 @@ typedef struct {
     char ntp1[MOSU_CFG_URL_MAX];
     char ntp2[MOSU_CFG_URL_MAX];
     uint16_t sync_hours;
+    /* 1..24 = sync this many times per day; 0 = use sync_hours. */
+    uint8_t sync_per_day;
     bool wifi_always_on; /* false = sync_only (best battery life) */
     char manual_time[24]; /* "YYYY-MM-DD HH:MM" fallback when all else fails */
 } mosu_clock_cfg_t;

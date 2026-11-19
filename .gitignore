@@ -25,6 +25,14 @@ tools/emu/_*.py
 tools/emu/*/target/
 tools/emu/panel/target/
 
+# Local hardware-session logs
+hw-*.log
+flash-*.log
+host-*.log
+build-*.log
+sim-*.log
+contact-sheet.log
+
 # Tool caches / generated audio
 tools/.cache/
 tools/piper-models/

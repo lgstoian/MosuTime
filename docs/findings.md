@@ -28,6 +28,18 @@ changed to make the emulator work.
 | 9 | Emulator rc2 I2C port shadowing | yes (emulator only) | n/a: no production impact |
 | 10 | One failed sync left the clock stale for hours | yes | yes: pull the router for two minutes and watch the retries |
 | 11 | Every voice clip said "marcă comercială" | yes | yes: listen to `preview.wav` on the watch |
+| 12 | QMI8658 answers at 0x6B, not 0x6A | yes | done: `imu` shows WHO_AM_I 0x05 and 1.028 g |
+| 13 | QMI8658 big-endian select vs little-endian decode | yes | done: `imu` shows a plausible 1 g |
+| 14 | PCF85063A time registers start at 0x04, not 0x02 | yes | done: `rtc` and reboot restore are correct |
+| 15 | I2C register reads need a repeated START | yes | done: RTC reads are no longer shifted |
+| 16 | Native USB secondary console cannot accept input | yes | done: COM11 console commands answer |
+| 17 | AXP2101 TS detection and a 4.1 V CV field | yes | pending: verify with the battery attached |
+| 18 | I2S channel disabled twice after a tone | yes | done: `test audio` is clean, no E line |
+| 19 | SH8601 logs an error for swap_xy(false) | yes (suppressed) | done: boot log has no false E line |
+| 20 | Rounded AMOLED corners clipped the status icons | yes | done: user confirmed both icons visible |
+| 21 | Geolocation ran before DHCP and could not resolve DNS | yes | done: `network timezone: Europe/Bucharest` |
+| 22 | SD socket is SPI-wired; DAT3/CS is GPIO17 | yes (drive high) | pending: mount a card |
+| 23 | `tools/build.ps1` aborted on normal stderr and rustup's gcc | yes | done: clean build on this machine |
 
 ## 1. SD mount blocking boot
 
@@ -355,6 +367,269 @@ lexicon in `tools/mosu_g2p.py` and the voice runs under onnxruntime (MIT).
 the ASR of the regenerated `preview.wav` returns *"Este ora două și treizeci de
 minute. Marți…"*. A native listening check on the watch is still required — an
 ASR is not a Romanian ear, and the emulator cannot hear audio at all.
+
+## 12. QMI8658 answers at 0x6B, not 0x6A
+
+**Symptom.** The first hardware boot logged `QMI8658 not found (who=0x00)`;
+`imu` returned `WHO_AM_I read failed`. Wrist raise was unavailable.
+
+**Cause.** The Waveshare wiki lists 0x6A, but the populated QMI8658C has SA0
+high. The `i2c` scan on the real board answered at **0x6B**:
+
+```
+0x18 ES8311  0x34 AXP2101  0x38 FT3168  0x40 ES7210  0x51 PCF85063  0x6B QMI8658
+```
+
+**Fix.** `QMI8658_ADDR` is 0x6B. The emulator part and all four emulator
+board files were moved to 0x6B so the desk tests match the watch.
+
+**Fix lives in.**
+[`components/mosu_board/src/mosu_board_i2c.c`](../components/mosu_board/src/mosu_board_i2c.c),
+[`tools/emu/imu/src/lib.rs`](../tools/emu/imu/src/lib.rs),
+[`tools/emu/board.json`](../tools/emu/board.json).
+
+**Verification.** `imu` prints `WHO_AM_I 0x05 (QMI8658)` and
+`accel 0.052 0.252 -0.995 g, |a| 1.028 g` at rest.
+
+## 13. QMI8658 big-endian select vs little-endian decode
+
+**Symptom.** With the address fixed, `imu` would have reported an almost
+zero magnitude at rest, and the wrist detector would never fire.
+
+**Cause.** CTRL1 was written as `0x60`: bit 6 is `ADDR_AI`, bit 5 is `BE`.
+`mosu_board_imu_read()` decodes the six acceleration bytes as little-endian
+`int16` pairs. Big-endian output byte-swaps every axis: 1 g becomes 0.0039 g.
+The emulator model accepts and ignores CTRL writes, so the desk tests could
+not catch it.
+
+**Fix.** CTRL1 is `0x40` (address auto-increment, little-endian).
+
+**Fix lives in.**
+[`components/mosu_board/src/mosu_board_i2c.c`](../components/mosu_board/src/mosu_board_i2c.c)
+(`mosu_board_imu_init`).
+
+**Verification.** `imu` reports `|a| 1.028 g`; a wrist raise while the face
+is off logs `screen on (motion)`.
+
+## 14. PCF85063A time registers start at 0x04, not 0x02
+
+**Symptom.** `rtc` decoded nonsense (for example `2006-01-11 07:00:73`) and
+the "hour" register counted like a seconds register. The year never changed
+from `06`.
+
+**Cause.** The code used the PCF8563 layout (seconds at 0x02). This board has
+a **PCF85063A**: 0x02 is the offset register and 0x03 is RAM; seconds start
+at 0x04. Every read and write was shifted by two registers.
+
+**Fix.** Use the PCF85063A constants: seconds 0x04, minutes 0x05, hours 0x06,
+day 0x07, weekday 0x08, month 0x09, year 0x0A. The oscillator-stop flag in
+the seconds register is now also checked, so a stale RTC is not trusted.
+
+**Fix lives in.**
+[`components/mosu_board/src/mosu_board_i2c.c`](../components/mosu_board/src/mosu_board_i2c.c)
+(`PCF85063_*`, `mosu_board_rtc_read`, `mosu_board_rtc_write`,
+`mosu_board_rtc_valid`).
+
+**Verification.** `settime 2026-11-19 22:15` then `rtc` shows
+`UTC 2026-11-19 20:15:03, valid 1`; a reboot logs
+`clock restored from RTC` and the same local time.
+
+## 15. I2C register reads need a repeated START
+
+**Symptom.** Even after the address fix, RTC reads still looked shifted: the
+first byte behaved like the offset register and the count wrapped at the
+wrong places.
+
+**Cause.** `reg_read()` used `i2c_master_transmit()` followed by
+`i2c_master_receive()`, two transactions with a STOP between them. The
+PCF85063 resets its register pointer on STOP, so the read started at 0x00.
+The AXP2101 and QMI8658 tolerated the split; the RTC did not.
+
+**Fix.** `i2c_master_transmit_receive()` sends the register address and reads
+the data in one transaction with a repeated START.
+
+**Fix lives in.**
+[`components/mosu_board/src/mosu_board_i2c.c`](../components/mosu_board/src/mosu_board_i2c.c)
+(`reg_read`).
+
+**Verification.** The RTC registers now read back exactly what was written,
+and `rtc` advances one second per second.
+
+## 16. Native USB secondary console cannot accept input
+
+**Symptom.** `idf.py monitor` showed the boot log over COM11, but typing
+`help`, `i2c` or `test screen` produced no answer.
+
+**Cause.** The board's USB-C is the ESP32-S3 native USB (GPIO19/20), not a
+UART bridge. `sdkconfig` had UART0 as the primary console and USB
+Serial/JTAG as the secondary. ESP-IDF's secondary USB console is
+output-only: it supports no REPL and no input. UART0 is only on reserved
+pads.
+
+**Fix.** Make `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG` the primary console,
+disable the secondary console, and enable
+`CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION` so the USB link survives automatic
+light sleep during bench work. The emulator overlay keeps UART0 because
+esp-emu does not model USB Serial/JTAG.
+
+**Fix lives in.** [`sdkconfig.defaults`](../sdkconfig.defaults),
+[`tools/sdkconfig.emulator`](../tools/sdkconfig.emulator).
+
+**Verification.** Every console command in this session answered over COM11;
+the boot log and `help` output are in `hw-console1.log` (not committed).
+
+## 17. AXP2101 TS detection breaks charging without an NTC
+
+**Symptom.** Not observed yet because no battery is attached. The board has
+no battery thermistor, and the AXP2101 charger looks at the TS pin unless it
+is put in fixed-input mode.
+
+**Cause.** Clearing ADC channel bit 1 is not enough; the TS pin control
+register (0x50) also has to select the external fixed input. Waveshare's
+example explicitly calls this out for boards without an NTC.
+
+**Fix.** Write `0x50 = 0x10` during PMU init, before charging is enabled.
+While auditing the charge registers, the CV field was found to be `0x02`,
+which is 4.1 V, not 4.2 V (`0x03`). The first profile is now 4.2 V, 200 mA
+constant current, 25 mA termination and 50 mA precharge: safe for a small
+single-cell pack until the real capacity is known.
+
+**Fix lives in.**
+[`components/mosu_board/src/mosu_board_i2c.c`](../components/mosu_board/src/mosu_board_i2c.c)
+(`mosu_board_pmu_init`).
+
+**Verification.** Pending: attach the battery, run `pmu`, and confirm the
+charge current and termination behave. Adjust 200 mA for the actual cell
+before the first full charge.
+
+## 18. I2S channel disabled twice after a tone
+
+**Symptom.** `test audio` played correctly but logged
+`E i2s_common: i2s_channel_disable(1262): the channel has not been enabled yet`
+at the end of the beeps.
+
+**Cause.** `mosu_board_audio` enabled the I2S channel before opening the
+codec, then disabled it again after `esp_codec_dev_close()`. `esp_codec_dev`
+already disables the channel in `close()`, so the second disable was an
+error. Removing the manual enable entirely made the open path log the same
+error because the IDF reconfig functions expect a running channel.
+
+**Fix.** Keep a tracked enable before `esp_codec_dev_open()`, but never call
+`i2s_channel_disable()` after `esp_codec_dev_close()`; clear the flag
+instead. The codec owns the disable.
+
+**Fix lives in.**
+[`components/mosu_board/src/mosu_board_audio.c`](../components/mosu_board/src/mosu_board_audio.c)
+(`ensure_channel`, `open_stream`, `mosu_board_audio_idle`,
+`mosu_board_audio_play_wav`).
+
+**Verification.** `test audio` returns `ESP_OK` with no E line; three clear
+beeps were heard, and the speaker was silent afterwards.
+
+## 19. SH8601 logs an error for swap_xy(false)
+
+**Symptom.** Every boot logged
+`E sh8601: swap_xy is not supported by this panel` even though the display
+was configured with `swap_xy = false`.
+
+**Cause.** `esp_lvgl_port_add_disp()` calls `esp_lcd_panel_swap_xy()`
+unconditionally, and the Waveshare SH8601 driver logs E and returns
+`ESP_ERR_NOT_SUPPORTED` even for `false`.
+
+**Fix.** Silence the `sh8601` tag only around `lvgl_port_add_disp()`, then
+restore its log level. The return value of `lvgl_port_add_disp()` remains
+the real verdict.
+
+**Fix lives in.**
+[`components/mosu_board/src/mosu_board_display.c`](../components/mosu_board/src/mosu_board_display.c)
+(`mosu_board_display_start`).
+
+**Verification.** The boot log now has no `E (` line; the face is drawn and
+the colour/grid/corner tests pass.
+
+## 20. Rounded AMOLED corners clipped the status icons
+
+**Symptom.** The battery outline and Wi-Fi icon were impossible to see on
+the real glass even though they were correct in the simulator.
+
+**Cause.** The panel has rounded corners; the status row was placed 20 px
+from the sides and 16 px from the top, inside the cut-out.
+
+**Fix.** `MOSU_SCREEN_MARGIN` is 48 px and `MOSU_STATUS_Y` is 30 px. The
+corner test pattern now draws its 20 px squares at a 48 px inset so the test
+measures the visible area, not the cut-out.
+
+**Fix lives in.**
+[`components/mosu_core/include/mosu_core/mosu_layout.h`](../components/mosu_core/include/mosu_core/mosu_layout.h),
+[`components/mosu_ui/src/mosu_ui.c`](../components/mosu_ui/src/mosu_ui.c)
+(`draw_test_corners`).
+
+**Verification.** The wearer confirmed both icons are fully visible and the
+four corner squares are clear of the glass edge.
+
+## 21. Geolocation ran before DHCP and could not resolve DNS
+
+**Symptom.** After joining `camera`, the log showed
+`esp-tls: couldn't get hostname for :ip-api.com: getaddrinfo() returns 202`
+and `timezone lookup failed`. The clock later synced, but the zone stayed at
+the configured fallback.
+
+**Cause.** `connect_to()` waited for `WIFI_EVENT_STA_CONNECTED`, which is
+association, not an IP address. The HTTP geolocation request ran before DHCP
+finished, so DNS failed.
+
+**Fix.** Wait for `IP_EVENT_STA_GOT_IP` before returning from
+`connect_to()`. The geolocation request and SNTP now run with an address.
+
+**Fix lives in.**
+[`components/mosu_net/src/mosu_net.c`](../components/mosu_net/src/mosu_net.c)
+(`BIT_GOT_IP`, `connect_to`).
+
+**Verification.** `sync` logs
+`network timezone: Europe/Bucharest (offset UTC-2)` and `clock synced`;
+`status` shows the IP and RSSI.
+
+## 22. SD socket is SPI-wired; DAT3/CS is GPIO17
+
+**Symptom.** Not observed yet because no card is attached. The board's TF
+socket is wired for SPI (MOSI GPIO1, SCK GPIO2, MISO GPIO3, CS GPIO17), and
+the printer wiki lists it that way.
+
+**Cause.** The firmware mounts 1-bit SDMMC on CMD/D0/CLK and does not drive
+GPIO17. A floating DAT3/CS can make the card start in SPI mode, so the
+SDMMC init fails.
+
+**Fix.** Drive GPIO17 high before mounting, which deselects SPI mode and lets
+the card enter SD mode. If a card still fails, switch the mount to SDSPI.
+
+**Fix lives in.**
+[`components/mosu_board/include/mosu_board.h`](../components/mosu_board/include/mosu_board.h)
+(`MOSU_PIN_SD_CS`),
+[`components/mosu_board/src/mosu_board_storage.c`](../components/mosu_board/src/mosu_board_storage.c)
+(`mount_now`).
+
+**Verification.** Pending: insert a FAT32 card, run `sd remount` and `config`,
+and confirm the 78 voice clips.
+
+## 23. `tools/build.ps1` aborted on normal stderr and rustup's gcc
+
+**Symptom.** `.\tools\build.ps1` stopped while sourcing `export.ps1` with
+`NativeCommandError`, then configure failed because `xtensa-esp32s3-elf-gcc`
+came from `C:\Users\...\.rustup\toolchains\esp\...`, not the IDF toolchain.
+
+**Cause.** The wrapper set `$ErrorActionPreference = "Stop"`; PowerShell 5.1
+turns normal native stderr (the IDF banner, CMake warnings) into terminating
+errors. The espup/rustup Xtensa toolchain was earlier in `PATH`, so the IDF
+version check rejected it.
+
+**Fix.** Run the wrapper with normal error handling and check
+`$LASTEXITCODE` explicitly after every native command; prepend the
+IDF-managed `xtensa-esp-elf` version from `tools/tools.json` to `PATH`.
+
+**Fix lives in.** [`tools/build.ps1`](../tools/build.ps1).
+
+**Verification.** A clean `build` from an empty `build/` and `sdkconfig`
+finishes with `Project build complete` and zero `warning:`/`error:` lines.
 
 ## Adding a finding
 

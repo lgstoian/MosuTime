@@ -277,7 +277,7 @@ static void test_config(void)
     EXPECT(cfg.display.brightness == 55);
     EXPECT(cfg.display.wake_on_touch);
     EXPECT(cfg.colors.time_am == 0xFFFFFF);
-    EXPECT_STR(cfg.clock.timezone, "EET-2EEST,M3.5.0/3,M10.5.0/4");
+    EXPECT_STR(cfg.clock.timezone, "Europe/Bucharest");
 
     EXPECT(mosu_config_timezone_ok("EET-2EEST,M3.5.0/3,M10.5.0/4"));
     EXPECT(mosu_config_timezone_ok("Europe/Bucharest"));

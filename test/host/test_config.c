@@ -70,6 +70,7 @@ static void test_shipped_config(void)
     EXPECT(cfg.display.screen_on_ms == 15000);
     EXPECT_STR(cfg.clock.timezone, "Europe/Bucharest");
     EXPECT(cfg.clock.sync_hours == 6);
+    EXPECT(cfg.clock.sync_per_day == 0);
     EXPECT(cfg.wifi_count == 1);
     EXPECT_STR(cfg.wifi[0].ssid, "Acasa");
     EXPECT_STR(cfg.wifi[0].pass, "parola");
@@ -228,11 +229,38 @@ static void test_fuzz_mutations(void)
     EXPECT_STR(cfg.device.name, "MosuTime");
 }
 
+static void test_sync_per_day(void)
+{
+    mosu_config_t cfg;
+    mosu_config_report_t report;
+
+    static const char per_day[] = "[clock]\nsync_per_day = 5\n";
+    mosu_config_defaults(&cfg);
+    int rc = mosu_config_parse(&cfg, per_day, sizeof(per_day) - 1, &report);
+    EXPECT(rc == 0);
+    EXPECT(report.errors == 0);
+    EXPECT(cfg.clock.sync_per_day == 5);
+    EXPECT(cfg.clock.sync_hours == 6);
+
+    static const char clamped[] = "[clock]\nsync_per_day = 99\n";
+    mosu_config_defaults(&cfg);
+    rc = mosu_config_parse(&cfg, clamped, sizeof(clamped) - 1, &report);
+    EXPECT(rc == 0);
+    EXPECT(cfg.clock.sync_per_day == 24);
+
+    static const char disabled[] = "[clock]\nsync_per_day = 0\n";
+    mosu_config_defaults(&cfg);
+    rc = mosu_config_parse(&cfg, disabled, sizeof(disabled) - 1, &report);
+    EXPECT(rc == 0);
+    EXPECT(cfg.clock.sync_per_day == 0);
+}
+
 void test_config_extra(void)
 {
     test_shipped_config();
     test_bom();
     test_long_network_fields();
+    test_sync_per_day();
     test_fuzz_random();
     test_fuzz_mutations();
 }

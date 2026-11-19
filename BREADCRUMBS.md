@@ -30,6 +30,9 @@ For the product constraints and the rules of the road, read
 | Debug a dead screen, touch, PMU or RTC on hardware | [`docs/bringup.md`](docs/bringup.md), [`components/mosu_board/src/mosu_board_display.c`](components/mosu_board/src/mosu_board_display.c), [`components/mosu_board/src/mosu_board_i2c.c`](components/mosu_board/src/mosu_board_i2c.c) |
 | See how the SD card failure path works | [`components/mosu_board/src/mosu_board_storage.c`](components/mosu_board/src/mosu_board_storage.c), [`main/app_main.c`](main/app_main.c) |
 | Change Wi-Fi, geolocation, SNTP or radio cycling | [`components/mosu_net/src/mosu_net.c`](components/mosu_net/src/mosu_net.c), [`components/mosu_policy/src/mosu_policy.c`](components/mosu_policy/src/mosu_policy.c) |
+| Choose how often the time syncs per day | `clock.sync_per_day` in [`sd_card/mosu.cfg`](sd_card/mosu.cfg), [`components/mosu_net/src/mosu_net.c`](components/mosu_net/src/mosu_net.c) (`sync_interval_s`) |
+| Provision Wi-Fi without an SD card | `wifi <ssid> <pass>` in [`components/mosu_diag/src/mosu_diag.c`](components/mosu_diag/src/mosu_diag.c), [`components/mosu_net/src/mosu_net.c`](components/mosu_net/src/mosu_net.c) (`mosu_net_set_network`) |
+| Understand the return-home presence scan | [`components/mosu_net/src/mosu_net.c`](components/mosu_net/src/mosu_net.c) (`home_ap_visible`, `s_next_presence_s`), [`docs/architecture.md`](docs/architecture.md) |
 | Change the IANA-to-POSIX timezone table or fallback | [`components/mosu_time/src/mosu_time.c`](components/mosu_time/src/mosu_time.c), [`components/mosu_policy/src/mosu_policy.c`](components/mosu_policy/src/mosu_policy.c) |
 | Change announcement queueing or clip gaps | [`components/mosu_audio/src/mosu_audio.c`](components/mosu_audio/src/mosu_audio.c) |
 | Add or change a maintenance-console command | [`components/mosu_diag/src/mosu_diag.c`](components/mosu_diag/src/mosu_diag.c), hooks in [`main/app_main.c`](main/app_main.c) |
@@ -54,7 +57,7 @@ For the product constraints and the rules of the road, read
 | `mosu_session` | Pure C screen/tap/battery state machine: screen-on deadline, wake request, say request, battery smoothing, Wi-Fi icon mapping. | [`include/mosu_session.h`](components/mosu_session/include/mosu_session.h), [`src/mosu_session.c`](components/mosu_session/src/mosu_session.c) |
 | `mosu_policy` | Pure C network policy: numeric UTC offset to POSIX TZ, geolocation response parsing, plausible-zone check, failed-sync backoff. | [`include/mosu_policy.h`](components/mosu_policy/include/mosu_policy.h), [`src/mosu_policy.c`](components/mosu_policy/src/mosu_policy.c) |
 | `mosu_config` | INI parser, range checks and sanitisation; `mosu_config_store.c` is the only part that touches NVS and the last-good cache. | [`include/mosu_config.h`](components/mosu_config/include/mosu_config.h), [`include/mosu_config_store.h`](components/mosu_config/include/mosu_config_store.h), [`src/`](components/mosu_config/src) |
-| `mosu_board` | The only board-specific component: QSPI CO5300 panel, FT3168 touch, AXP2101 PMU, PCF85063 RTC, QMI8658 IMU, ES8311 audio and the SD card. | [`include/mosu_board.h`](components/mosu_board/include/mosu_board.h), [`src/`](components/mosu_board/src) |
+| `mosu_board` | The only board-specific component: QSPI CO5300 panel, FT3168 touch, AXP2101 PMU, PCF85063A RTC, QMI8658 IMU at 0x6B, ES8311 audio and the SD card. | [`include/mosu_board.h`](components/mosu_board/include/mosu_board.h), [`src/`](components/mosu_board/src) |
 | `mosu_time` | UTC system clock, RTC restore/persist, SNTP write-back, IANA-to-POSIX timezone table and numeric-offset fallback. | [`include/mosu_time.h`](components/mosu_time/include/mosu_time.h), [`src/mosu_time.c`](components/mosu_time/src/mosu_time.c) |
 | `mosu_net` | Wi-Fi association, HTTP (or HTTPS) geolocation, SNTP and switching the radio off again. Runs in its own task so the UI never blocks. | [`include/mosu_net.h`](components/mosu_net/include/mosu_net.h), [`src/mosu_net.c`](components/mosu_net/src/mosu_net.c) |
 | `mosu_audio` | Announcement queue and clip chaining; never interrupts a sentence in progress. | [`include/mosu_audio.h`](components/mosu_audio/include/mosu_audio.h), [`src/mosu_audio.c`](components/mosu_audio/src/mosu_audio.c) |
@@ -131,7 +134,12 @@ replaces [`docs/bringup.md`](docs/bringup.md).
   of ESP-IDF headers. If a test needs a clock, pass a timestamp in; the pure
   layer has no global state.
 - The panel is AMOLED: "off" means the panel's own off command and brightness
-  zero, not just a black framebuffer.
+  zero, not just a black framebuffer. The glass has rounded corners; keep
+  status icons and the corner test at a 48 px inset.
+- The board's only reachable USB port is the ESP32-S3 native USB. The
+  production console is USB Serial/JTAG; UART0 is on reserved pads.
+- The QMI8658 answers at **0x6B** on this board (not 0x6A), and the
+  PCF85063A time registers start at **0x04** (not the PCF8563's 0x02).
 - `mosu.cfg` is read once at boot. `sd remount` remounts the card but does not
   reparse the file; `reboot` applies config changes.
 - `build/`, `build-emu/` and emulator logs are generated. Do not commit them.

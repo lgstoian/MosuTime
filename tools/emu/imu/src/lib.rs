@@ -20,7 +20,11 @@ use esp_part::prelude::*;
 const SCL: &str = "SCL";
 const SDA: &str = "SDA";
 
-const DEFAULT_ADDR: u32 = 0x6A;
+/* The real board has SA0 high: the QMI8658C answers at 0x6B, not the
+ * 0x6B printed in the Waveshare wiki.  The lower-level CTRL1 byte-order
+ * bit is not modelled; this part always returns little-endian, which is
+ * what the production driver selects with CTRL1 = 0x40. */
+const DEFAULT_ADDR: u32 = 0x6B;
 
 /// The range the firmware selects: 0x01 in CTRL2 is +-4 g.
 const LSB_PER_G: f32 = 8192.0;
@@ -191,7 +195,7 @@ mod tests {
         let mut imu = Qmi8658::default();
         imu.configure(&PartConfig {
             pins: [(SCL.to_string(), 14), (SDA.to_string(), 15)].into(),
-            addr: 0x6A,
+            addr: 0x6B,
         });
         imu
     }
@@ -258,9 +262,9 @@ mod tests {
     #[test]
     fn a_separate_transmit_then_receive_uses_the_pointer() {
         let mut imu = wired();
-        let wrote = imu.on_bus(&request(0x6A, &[0x35], 0)).unwrap();
+        let wrote = imu.on_bus(&request(0x6B, &[0x35], 0)).unwrap();
         assert!(wrote.ack && wrote.data.is_empty());
-        let reply = imu.on_bus(&request(0x6A, &[], 6)).unwrap();
+        let reply = imu.on_bus(&request(0x6B, &[], 6)).unwrap();
         assert_eq!(reply.data, [0, 0, 0, 0, 0, 0x20]);
     }
 
@@ -268,7 +272,7 @@ mod tests {
     fn a_split_read_continues_where_it_stopped() {
         let mut imu = wired();
         assert_eq!(read(&mut imu, 0x35, 2), [0, 0]);
-        let mut rest = request(0x6A, &[], 4);
+        let mut rest = request(0x6B, &[], 4);
         if let Some(bus_request::Op::I2c(i2c)) = &mut rest.op {
             i2c.continues = true;
         }
@@ -279,7 +283,7 @@ mod tests {
     fn control_writes_are_ignored_and_acknowledged() {
         let mut imu = wired();
         for (reg, value) in [(0x02u8, 0x60u8), (0x03, 0x1D), (0x08, 0x01)] {
-            let reply = imu.on_bus(&request(0x6A, &[reg, value], 0)).unwrap();
+            let reply = imu.on_bus(&request(0x6B, &[reg, value], 0)).unwrap();
             assert!(reply.ack);
         }
         assert_eq!(read(&mut imu, 0x35, 6), [0, 0, 0, 0, 0, 0x20]);
@@ -289,7 +293,7 @@ mod tests {
     fn it_claims_its_address_on_the_watchs_pins() {
         assert_eq!(wired().claims(), [Claim {
             what: Some(claim::What::I2c(I2cClaim {
-                addr: 0x6A,
+                addr: 0x6B,
                 scl_pin: Some(14),
                 sda_pin: Some(15),
             })),

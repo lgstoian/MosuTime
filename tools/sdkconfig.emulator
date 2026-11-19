@@ -3,6 +3,11 @@
 # this file is only used by tools/emu.sh.
 # CONFIG_PM_ENABLE is not set
 # CONFIG_FREERTOS_USE_TICKLESS_IDLE is not set
+# esp-emu feeds the firmware's console through UART0.  The production board
+# uses the native USB Serial/JTAG port instead; keep the emulator on UART.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+# CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG is not set
 CONFIG_ESP_TASK_WDT_PANIC=n
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=60
 CONFIG_MOSU_SKIP_SD=y

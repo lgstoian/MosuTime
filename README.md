@@ -10,7 +10,8 @@ The watch face is deliberately boring:
 
 * the hour on one line, the minutes on another, 12-hour format, no leading
   zero, no colon;
-* a small battery icon in one corner and a small Wi-Fi icon in the other;
+* a small battery icon in one corner and a small Wi-Fi icon in the other,
+  inset far enough to clear the AMOLED's rounded corners;
 * **white numerals in the morning, warm amber numerals in the evening** - he
   knows whether it is AM or PM from the colour, without reading anything;
 * otherwise the screen is black and off.
@@ -52,6 +53,11 @@ for a quick preview without any emulator.
 * ESP-IDF **5.5.5**, LVGL **9.6.0**
 * A FAT32 microSD card (the voice clips and `mosu.cfg` live there)
 
+Board-specific notes: the QMI8658C has SA0 high and answers at **0x6B**, and
+the RTC is a **PCF85063A** whose time registers start at 0x04. The TF socket
+also carries an SPI chip select on DAT3/GPIO17, which the firmware drives high
+before the 1-bit SDMMC mount. See [`docs/findings.md`](docs/findings.md).
+
 The firmware does not use the Waveshare BSP. `components/mosu_board` talks to
 the panel, touch controller, PMU, RTC, IMU and codec directly, so a port to
 another board replaces one component and nothing else.
@@ -62,23 +68,30 @@ another board replaces one component and nothing else.
 # once, in an ESP-IDF 5.5.x environment
 idf.py set-target esp32s3
 idf.py build
-idf.py -p COM5 flash monitor
+idf.py -p COM11 flash monitor
 ```
 
-On Windows, run `export.bat` from the ESP-IDF installation first. If another
-Xtensa toolchain is earlier in `PATH`, put the one matching your IDF version
-first; the project checks the compiler version at configure time.
+The board's only reachable USB port is the ESP32-S3 native USB, so the
+firmware uses USB Serial/JTAG as the **primary** console. UART0 is available
+only on the reserved GPIO43/44 pads. Use the COM port Windows assigns to the
+watch; this machine enumerates it as COM11.
 
-`tools/build.ps1` wraps this for a Windows machine:
+On Windows, run `export.bat` from the ESP-IDF installation first. If another
+Xtensa toolchain is earlier in `PATH` (for example the one installed by
+`espup`/rustup), the project checks the compiler version at configure time.
+`tools/build.ps1` puts the IDF-managed toolchain first and handles the normal
+stderr output from the IDF environment.
 
 ```powershell
-.\tools\build.ps1 -Port COM5 -Flash
+.\tools\build.ps1 -Port COM11 -Flash
 ```
 
 The partition table is 32 MB with two OTA application slots and a data
 partition for NVS. The default configuration enables automatic light sleep,
 DFS, PSRAM, the certificate bundle for optional HTTPS endpoints, and 1000 Hz
-FreeRTOS ticks.
+FreeRTOS ticks. Automatic light sleep is held off while a USB host is
+connected so the native-USB console stays alive; it resumes when the cable is
+unplugged.
 
 ## SD card
 
@@ -114,6 +127,8 @@ screen_on_ms = 15000
 [clock]
 auto_timezone = true
 timezone = Europe/Bucharest
+sync_hours = 6           # interval in hours, 1..168
+sync_per_day = 0         # 1..24 overrides sync_hours; 0 = use sync_hours
 
 [announce]
 volume = 85
@@ -153,7 +168,8 @@ list and the replacement procedure are in [`docs/voice.md`](docs/voice.md).
 | Touch | screen on; the touch interrupt also wakes the CPU from light sleep |
 | Double tap | a short border flash, then the time and weekday are spoken |
 | Exact hour | only the hour phrase is played: *"Este ora două."* |
-| Wi-Fi sync | at boot and every `sync_hours`, with 5/15/30 minute retries after a failure; the radio is switched off immediately after |
+| Wi-Fi sync | at boot and every `sync_hours` or `sync_per_day`, with 5/15/30 minute retries after a failure; the radio is switched off immediately after |
+| Wi-Fi lost | the clock keeps running from the RTC; the icon turns red; no panic; a presence scan notices when the network returns |
 | No time yet | `--` is shown until the RTC, manual time or SNTP provides a date |
 
 The Wi-Fi icon is grey before the first successful sync, green after a
@@ -209,7 +225,7 @@ wrist detectors, seven-segment renderer) is shared by the firmware, the host
 tests and the simulator.
 
 ```sh
-# host tests (440 checks)
+# host tests (450 checks)
 cmake -S test/host -B test/host/build
 cmake --build test/host/build
 ./test/host/build/mosu_tests
@@ -269,6 +285,7 @@ The USB/UART console is for maintenance, not for the wearer:
 ```
 help status time sync say settime bright N vol N tap reboot
 i2c pmu rtc imu pm heap tasks display config
+wifi <ssid> <password> | wifi scan | wifi presence | wifi clear
 test screen [colors|grid|corners|off] | test touch | test audio
 screenshot [path] | sd remount
 power screen on|off | power wifi | power idle

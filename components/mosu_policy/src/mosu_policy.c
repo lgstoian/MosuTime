@@ -349,12 +349,11 @@ void mosu_policy_parse_geo(const char *body, mosu_policy_geo_t *out)
     parse_lines(body, out);
 }
 
-uint32_t mosu_policy_next_sync_s(uint8_t fail_count, uint16_t sync_hours)
+uint32_t mosu_policy_next_sync_s(uint8_t fail_count, uint32_t sync_interval_s)
 {
     if (fail_count > 0 && fail_count <= MOSU_POLICY_SYNC_RETRIES) {
         return s_backoff_s[fail_count - 1];
     }
 
-    uint32_t hours = sync_hours < 1 ? 1u : sync_hours;
-    return hours * 3600u;
+    return sync_interval_s < 3600u ? 3600u : sync_interval_s;
 }

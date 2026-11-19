@@ -173,22 +173,25 @@ static void test_backoff(void)
     const uint32_t hour = 3600;
 
     /* Success resets to the normal interval. */
-    EXPECT(mosu_policy_next_sync_s(0, 6) == 6 * hour);
-    EXPECT(mosu_policy_next_sync_s(0, 1) == hour);
+    EXPECT(mosu_policy_next_sync_s(0, 6 * hour) == 6 * hour);
+    EXPECT(mosu_policy_next_sync_s(0, 1 * hour) == hour);
+
+    /* Five syncs a day is 4.8 hours, not a whole number of hours. */
+    EXPECT(mosu_policy_next_sync_s(0, 86400 / 5) == 17280);
 
     /* Three bounded retries: 5, 15 and 30 minutes. */
-    EXPECT(mosu_policy_next_sync_s(1, 6) == 5 * 60);
-    EXPECT(mosu_policy_next_sync_s(2, 6) == 15 * 60);
-    EXPECT(mosu_policy_next_sync_s(3, 6) == 30 * 60);
+    EXPECT(mosu_policy_next_sync_s(1, 6 * hour) == 5 * 60);
+    EXPECT(mosu_policy_next_sync_s(2, 6 * hour) == 15 * 60);
+    EXPECT(mosu_policy_next_sync_s(3, 6 * hour) == 30 * 60);
 
     /* After the third retry, wait the configured interval again. */
-    EXPECT(mosu_policy_next_sync_s(4, 6) == 6 * hour);
-    EXPECT(mosu_policy_next_sync_s(5, 6) == 6 * hour);
-    EXPECT(mosu_policy_next_sync_s(255, 6) == 6 * hour);
+    EXPECT(mosu_policy_next_sync_s(4, 6 * hour) == 6 * hour);
+    EXPECT(mosu_policy_next_sync_s(5, 6 * hour) == 6 * hour);
+    EXPECT(mosu_policy_next_sync_s(255, 6 * hour) == 6 * hour);
 
     /* The retries never exceed a one-hour interval. */
-    EXPECT(mosu_policy_next_sync_s(3, 1) == 30 * 60);
-    EXPECT(mosu_policy_next_sync_s(3, 1) < hour);
+    EXPECT(mosu_policy_next_sync_s(3, 1 * hour) == 30 * 60);
+    EXPECT(mosu_policy_next_sync_s(3, 1 * hour) < hour);
 
     /* A zero interval is clamped instead of causing a busy loop. */
     EXPECT(mosu_policy_next_sync_s(0, 0) == hour);

@@ -2,7 +2,12 @@
 
 MosuTime has no audio in flash. Every announcement is assembled at runtime
 from small WAV files on the SD card, so the wording and the voice can change
-without rebuilding the firmware. `tools/gen_voice.py` renders all of them with
+without rebuilding the firmware.
+
+**Hardware status (session 1).** The codec and speaker path was verified with
+`test audio` on the real watch: three clear beeps and silence afterwards.
+The spoken phrases still need the SD card and the 78 generated clips, so no
+voice clip has been heard on the glass yet. `tools/gen_voice.py` renders all of them with
 a local ONNX voice, `tools/mosu_g2p.py` supplies the Romanian pronunciation,
 and `tools/check_voice.py` verifies a folder before it is copied onto the card.
 

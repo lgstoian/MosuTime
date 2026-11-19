@@ -30,7 +30,21 @@ static const char *TAG = "mosu_board";
 
 #define AXP2101_ADDR 0x34
 #define PCF85063_ADDR 0x51
-#define QMI8658_ADDR 0x6A
+/* The Waveshare wiki says 0x6A, but the populated QMI8658C has SA0 high and
+ * answers at 0x6B on the real board (confirmed with the `i2c` scan). */
+#define QMI8658_ADDR 0x6B
+
+/* PCF85063A register map.  This is not the PCF8563 layout: 0x02/0x03 are
+ * the offset and RAM registers, and the time starts at 0x04.  Using the
+ * PCF8563 addresses shifted every read and wrote the time into the wrong
+ * registers (symptom: an hour register counting like seconds). */
+#define PCF85063_SEC 0x04
+#define PCF85063_MIN 0x05
+#define PCF85063_HOUR 0x06
+#define PCF85063_DAY 0x07
+#define PCF85063_WEEKDAY 0x08
+#define PCF85063_MONTH 0x09
+#define PCF85063_YEAR 0x0A
 
 static i2c_master_bus_handle_t s_bus;
 static i2c_master_dev_handle_t s_pmu;
@@ -42,6 +56,7 @@ static uint8_t s_rtc_month;
 static uint8_t s_rtc_day;
 static uint8_t s_rtc_hour;
 static bool s_rtc_ok;
+static bool s_rtc_os; /* oscillator-stop flag: the time is not trustworthy */
 
 i2c_master_bus_handle_t mosu_board_i2c_bus(void)
 {
@@ -61,11 +76,11 @@ static esp_err_t bus_add(uint8_t address, i2c_master_dev_handle_t *out)
 static esp_err_t reg_read(i2c_master_dev_handle_t dev, uint8_t reg, uint8_t *buf,
                           size_t len)
 {
-    esp_err_t err = i2c_master_transmit(dev, &reg, 1, 100);
-    if (err != ESP_OK) {
-        return err;
-    }
-    return i2c_master_receive(dev, buf, len, 100);
+    /* One combined transaction: the register address and the read must be
+     * separated by a repeated START.  The PCF85063 resets its address
+     * pointer when it sees a STOP, so transmit()+receive() made every RTC
+     * read start at register 0x00 and return shifted bytes. */
+    return i2c_master_transmit_receive(dev, &reg, 1, buf, len, 100);
 }
 
 static esp_err_t reg_write(i2c_master_dev_handle_t dev, uint8_t reg,
@@ -114,10 +129,20 @@ esp_err_t mosu_board_pmu_init(void)
      * The board has no battery thermistor; leaving TS enabled breaks
      * charging. */
     ESP_RETURN_ON_ERROR(pmu_update(0x30, 0x0F, 0x0D), TAG, "pmu adc");
+    /* TS pin control: external fixed input, no NTC.  Clearing the ADC
+     * channel alone is not enough; the charger still looks at the TS pin
+     * configuration unless 0x50 selects the fixed-input mode (bit 4). */
+    ESP_RETURN_ON_ERROR(pmu_update(0x50, 0x1F, 0x10), TAG, "pmu ts");
     /* Battery detection. */
     ESP_RETURN_ON_ERROR(pmu_update(0x68, 0x01, 0x01), TAG, "pmu batdet");
-    /* Never charge past 4.2 V: this is an ordinary single-cell LiPo. */
-    ESP_RETURN_ON_ERROR(pmu_update(0x64, 0x03, 0x02), TAG, "pmu cv");
+    /* Charge target 4.2 V (CV field value 3; 2 would be 4.1 V). */
+    ESP_RETURN_ON_ERROR(pmu_update(0x64, 0x07, 0x03), TAG, "pmu cv");
+    /* Conservative charge profile until the cell is known: 200 mA constant
+     * current, 25 mA termination, 50 mA precharge.  Adjust for the actual
+     * capacity before the first full charge. */
+    ESP_RETURN_ON_ERROR(pmu_update(0x62, 0x1F, 0x08), TAG, "pmu ichg");
+    ESP_RETURN_ON_ERROR(pmu_update(0x63, 0x0F, 0x01), TAG, "pmu iterm");
+    ESP_RETURN_ON_ERROR(pmu_update(0x61, 0x0F, 0x02), TAG, "pmu ipre");
 
     ESP_LOGI(TAG, "AXP2101 ready (status 0x%02X)", status);
     return ESP_OK;
@@ -195,8 +220,10 @@ esp_err_t mosu_board_rtc_read(struct tm *utc)
     }
 
     uint8_t raw[7];
-    ESP_RETURN_ON_ERROR(reg_read(s_rtc, 0x02, raw, sizeof(raw)), TAG, "rtc");
+    ESP_RETURN_ON_ERROR(reg_read(s_rtc, PCF85063_SEC, raw, sizeof(raw)), TAG,
+                        "rtc");
 
+    s_rtc_os = (raw[0] & 0x80) != 0;
     uint8_t sec = bcd_to_bin(raw[0] & 0x7F);
     uint8_t min = bcd_to_bin(raw[1] & 0x7F);
     uint8_t hour_reg = raw[2];
@@ -247,14 +274,16 @@ esp_err_t mosu_board_rtc_write(const struct tm *utc)
     raw[5] = bin_to_bcd((uint8_t)(utc->tm_mon + 1)) & 0x1F;
     raw[6] = bin_to_bcd((uint8_t)(utc->tm_year % 100));
 
-    ESP_RETURN_ON_ERROR(reg_write(s_rtc, 0x02, raw, sizeof(raw)), TAG, "rtc w");
+    ESP_RETURN_ON_ERROR(reg_write(s_rtc, PCF85063_SEC, raw, sizeof(raw)), TAG,
+                        "rtc w");
     s_rtc_ok = true;
+    s_rtc_os = false;
     return ESP_OK;
 }
 
 bool mosu_board_rtc_valid(void)
 {
-    if (!s_rtc_ok || s_rtc_year < 24 || s_rtc_year > 99) {
+    if (!s_rtc_ok || s_rtc_os || s_rtc_year < 24 || s_rtc_year > 99) {
         return false;
     }
     if (s_rtc_month < 1 || s_rtc_month > 12) {
@@ -287,8 +316,14 @@ esp_err_t mosu_board_imu_init(void)
         return ESP_ERR_NOT_FOUND;
     }
 
-    /* CTRL1: address auto-increment, little endian. */
-    ESP_RETURN_ON_ERROR(reg_write_u8(s_imu, 0x02, 0x60), TAG, "imu ctrl1");
+    /* CTRL1: address auto-increment, little endian.
+     *
+     * Bit 6 is ADDR_AI and bit 5 is BE.  0x60 would enable address
+     * auto-increment *and* big-endian output, while mosu_board_imu_read()
+     * decodes the six bytes as little-endian int16 pairs.  That byte-swaps
+     * every axis: at rest |a| reads as ~0.004 g instead of 1 g and the
+     * wrist-raise detector never fires.  0x40 is the little-endian form. */
+    ESP_RETURN_ON_ERROR(reg_write_u8(s_imu, 0x02, 0x40), TAG, "imu ctrl1");
 
     /* CTRL2: +-4 g, 21 Hz low power ODR.  The IMU only runs while the
      * screen is off; the low ODR keeps its average current negligible. */
@@ -336,8 +371,12 @@ static const char *i2c_name(uint8_t address)
         return "PCF85063 RTC";
     case QMI8658_ADDR:
         return "QMI8658 IMU";
+    case 0x38:
+        return "FT3168 touch";
     case 0x18:
         return "ES8311 codec";
+    case 0x40:
+        return "ES7210 mic ADC";
     default:
         return NULL;
     }
@@ -389,6 +428,18 @@ void mosu_board_pmu_dump(void)
         printf("pmu : reg 0x%02X = 0x%02X\n", reg, value);
     }
 
+    /* Charging-related registers: TS pin mode, precharge/constant current,
+     * termination current and CV target.  Printing them makes the battery
+     * bring-up check possible without a vendor tool. */
+    static const uint8_t charge_regs[] = {0x50, 0x61, 0x62, 0x63, 0x64};
+    for (size_t i = 0; i < sizeof(charge_regs) / sizeof(charge_regs[0]); i++) {
+        uint8_t value = 0;
+        esp_err_t err = reg_read(s_pmu, charge_regs[i], &value, 1);
+        if (err == ESP_OK) {
+            printf("pmu : reg 0x%02X = 0x%02X\n", charge_regs[i], value);
+        }
+    }
+
     mosu_board_pmu_t pmu;
     esp_err_t err = mosu_board_pmu_read(&pmu);
     if (err != ESP_OK) {
@@ -411,14 +462,23 @@ void mosu_board_rtc_dump(void)
         return;
     }
 
+    uint8_t ctrl[3] = {0};
+    esp_err_t err = reg_read(s_rtc, 0x00, ctrl, sizeof(ctrl));
+    if (err != ESP_OK) {
+        printf("rtc : control read failed (%s)\n", esp_err_to_name(err));
+        return;
+    }
+
     uint8_t raw[7];
-    esp_err_t err = reg_read(s_rtc, 0x02, raw, sizeof(raw));
+    err = reg_read(s_rtc, PCF85063_SEC, raw, sizeof(raw));
     if (err != ESP_OK) {
         printf("rtc : read failed (%s)\n", esp_err_to_name(err));
         return;
     }
 
-    printf("rtc : 0x02..0x08 = %02X %02X %02X %02X %02X %02X %02X\n", raw[0],
+    printf("rtc : ctrl 0x00=%02X 0x01=%02X offset=%02X\n", ctrl[0], ctrl[1],
+           ctrl[2]);
+    printf("rtc : 0x04..0x0A = %02X %02X %02X %02X %02X %02X %02X\n", raw[0],
            raw[1], raw[2], raw[3], raw[4], raw[5], raw[6]);
 
     struct tm utc;

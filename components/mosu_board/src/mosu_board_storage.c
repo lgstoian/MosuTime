@@ -6,6 +6,7 @@
  * stop the watch from showing the time.  The blocking FAT mount therefore runs
  * in its own task and the boot waits only a few seconds for it.
  */
+#include "driver/gpio.h"
 #include "driver/sdmmc_host.h"
 #include "esp_log.h"
 #include "esp_vfs_fat.h"
@@ -28,6 +29,21 @@ static volatile bool s_running;
 
 static esp_err_t mount_now(void)
 {
+    /* The TF socket is also wired for SPI, with CS on GPIO17.  In SD mode
+     * that pin is DAT3/CS and must be high, otherwise a floating line can
+     * make the card start in SPI mode and the SDMMC init fails.  The
+     * SDMMC host uses 1-bit width, so it does not drive GPIO17 itself. */
+    const gpio_config_t cs_cfg = {
+        .pin_bit_mask = 1ULL << MOSU_PIN_SD_CS,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    if (gpio_config(&cs_cfg) == ESP_OK) {
+        gpio_set_level(MOSU_PIN_SD_CS, 1);
+    }
+
     const esp_vfs_fat_sdmmc_mount_config_t mount_cfg = {
         .format_if_mount_failed = false,
         .max_files = 6,
@@ -54,8 +70,21 @@ static esp_err_t mount_now(void)
         .flags = 0,
     };
 
-    return esp_vfs_fat_sdmmc_mount(MOSU_SD_MOUNT_POINT, &host, &slot_cfg,
-                                   &mount_cfg, &s_card);
+    /* No card is a normal operating state for this watch: the driver logs
+     * two E lines for the expected OCR timeout, which makes a clean boot
+     * log impossible.  Keep the code from mosu_sd (it logs the result) and
+     * suppress only the raw driver tags around the attempt. */
+    esp_log_level_t sdmmc_level = esp_log_level_get("sdmmc_common");
+    esp_log_level_t fat_level = esp_log_level_get("vfs_fat_sdmmc");
+    esp_log_level_set("sdmmc_common", ESP_LOG_NONE);
+    esp_log_level_set("vfs_fat_sdmmc", ESP_LOG_NONE);
+
+    esp_err_t err = esp_vfs_fat_sdmmc_mount(MOSU_SD_MOUNT_POINT, &host,
+                                            &slot_cfg, &mount_cfg, &s_card);
+
+    esp_log_level_set("sdmmc_common", sdmmc_level);
+    esp_log_level_set("vfs_fat_sdmmc", fat_level);
+    return err;
 }
 
 static void mount_task(void *arg)

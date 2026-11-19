@@ -10,6 +10,7 @@
  * that lasts for weeks.
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_check.h"
@@ -33,8 +34,11 @@ static const char *TAG = "mosu_net";
 
 #define BIT_CONNECTED BIT0
 #define BIT_FAILED BIT1
+/* Association is not enough: the geolocation request needs an IP address,
+ * so wait for DHCP before returning from connect_to(). */
+#define BIT_GOT_IP BIT2
 
-static const mosu_config_t *s_cfg;
+static mosu_config_t *s_cfg;
 static mosu_config_t s_cfg_store;
 static EventGroupHandle_t s_events;
 static TaskHandle_t s_task;
@@ -44,10 +48,39 @@ static volatile mosu_net_state_t s_state = MOSU_NET_IDLE;
 static volatile int8_t s_rssi;
 static char s_ip[16];
 static uint32_t s_next_sync_s;
+static uint32_t s_next_presence_s;
+static uint8_t s_last_reason;
+static bool s_last_connected;
+
+/* How often to look for the configured network while a sync is failing.
+ * A scan is much cheaper than a full join attempt: the radio is on for
+ * about a second, then the normal sync schedule still applies. */
+#define PRESENCE_SCAN_S (15 * 60)
+
+/* The console may replace the network list while the net task is reading it.
+ * The strings are small, so a short spinlock around the copy is enough. */
+static portMUX_TYPE s_cfg_mux = portMUX_INITIALIZER_UNLOCKED;
+
+static void copy_network(uint8_t index, char *ssid, size_t ssid_len, char *pass,
+                         size_t pass_len)
+{
+    taskENTER_CRITICAL(&s_cfg_mux);
+    snprintf(ssid, ssid_len, "%s", s_cfg->wifi[index].ssid);
+    snprintf(pass, pass_len, "%s", s_cfg->wifi[index].pass);
+    taskEXIT_CRITICAL(&s_cfg_mux);
+}
 
 static uint32_t uptime_s(void)
 {
     return (uint32_t)(esp_timer_get_time() / 1000000LL);
+}
+
+static uint32_t sync_interval_s(void)
+{
+    if (s_cfg->clock.sync_per_day > 0) {
+        return 86400u / s_cfg->clock.sync_per_day;
+    }
+    return (uint32_t)s_cfg->clock.sync_hours * 3600u;
 }
 
 static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id,
@@ -59,6 +92,10 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id,
         if (id == WIFI_EVENT_STA_CONNECTED) {
             xEventGroupSetBits(s_events, BIT_CONNECTED);
         } else if (id == WIFI_EVENT_STA_DISCONNECTED) {
+            const wifi_event_sta_disconnected_t *ev =
+                (const wifi_event_sta_disconnected_t *)data;
+            s_last_reason = ev->reason;
+            ESP_LOGW(TAG, "disconnected: reason %u", (unsigned)ev->reason);
             xEventGroupClearBits(s_events, BIT_CONNECTED);
             xEventGroupSetBits(s_events, BIT_FAILED);
         }
@@ -70,7 +107,8 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id,
         if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
             s_rssi = ap.rssi;
         }
-        xEventGroupSetBits(s_events, BIT_CONNECTED);
+        s_last_reason = 0;
+        xEventGroupSetBits(s_events, BIT_CONNECTED | BIT_GOT_IP);
     }
 }
 
@@ -88,15 +126,33 @@ static bool wifi_ensure_started(void)
     return true;
 }
 
-static bool connect_to(const mosu_wifi_cfg_t *net, uint32_t timeout_ms)
+static bool connect_to(uint8_t index, uint32_t timeout_ms)
 {
+    s_last_reason = 0;
     if (!wifi_ensure_started()) {
         return false;
     }
 
+    char ssid[MOSU_CFG_SSID_MAX];
+    char pass[MOSU_CFG_PASS_MAX];
+    copy_network(index, ssid, sizeof(ssid), pass, sizeof(pass));
+
     wifi_config_t wc = {0};
-    snprintf((char *)wc.sta.ssid, sizeof(wc.sta.ssid), "%s", net->ssid);
-    snprintf((char *)wc.sta.password, sizeof(wc.sta.password), "%s", net->pass);
+    /* wifi_sta_config_t has no separate length fields in ESP-IDF, so keep
+     * one byte for the terminator.  The console setter rejects anything
+     * longer; this clamp only protects a config file from a malformed
+     * value. */
+    size_t ssid_len = strlen(ssid);
+    if (ssid_len >= sizeof(wc.sta.ssid)) {
+        ssid_len = sizeof(wc.sta.ssid) - 1;
+    }
+    memcpy(wc.sta.ssid, ssid, ssid_len);
+
+    size_t pass_len = strlen(pass);
+    if (pass_len >= sizeof(wc.sta.password)) {
+        pass_len = sizeof(wc.sta.password) - 1;
+    }
+    memcpy(wc.sta.password, pass, pass_len);
     wc.sta.threshold.authmode = WIFI_AUTH_OPEN;
     wc.sta.pmf_cfg.capable = true;
 
@@ -106,17 +162,20 @@ static bool connect_to(const mosu_wifi_cfg_t *net, uint32_t timeout_ms)
         return false;
     }
 
-    xEventGroupClearBits(s_events, BIT_CONNECTED | BIT_FAILED);
+    xEventGroupClearBits(s_events, BIT_CONNECTED | BIT_GOT_IP | BIT_FAILED);
     s_state = MOSU_NET_CONNECTING;
     esp_err_t err = esp_wifi_connect();
     if (err != ESP_OK) {
         return false;
     }
 
-    EventBits_t bits = xEventGroupWaitBits(s_events, BIT_CONNECTED | BIT_FAILED,
+    /* Wait for DHCP, not just association: http_client's getaddrinfo()
+     * fails with no address (the symptom was "couldn't get hostname for
+     * ip-api.com" a second after joining). */
+    EventBits_t bits = xEventGroupWaitBits(s_events, BIT_GOT_IP | BIT_FAILED,
                                            pdFALSE, pdFALSE,
                                            pdMS_TO_TICKS(timeout_ms));
-    return (bits & BIT_CONNECTED) != 0;
+    return (bits & BIT_GOT_IP) != 0;
 }
 
 /*
@@ -269,16 +328,25 @@ static void radio_off_if_possible(void)
 
 static bool run_sync(void)
 {
+    s_last_connected = false;
     if (s_cfg->wifi_count == 0) {
         s_state = MOSU_NET_IDLE;
         return true;
     }
 
+    uint8_t count = 0;
+    taskENTER_CRITICAL(&s_cfg_mux);
+    count = s_cfg->wifi_count;
+    taskEXIT_CRITICAL(&s_cfg_mux);
+
     bool connected = false;
-    for (uint8_t i = 0; i < s_cfg->wifi_count && !connected; i++) {
-        connected = connect_to(&s_cfg->wifi[i], 15000);
+    for (uint8_t i = 0; i < count && !connected; i++) {
+        connected = connect_to(i, 15000);
         if (!connected) {
-            ESP_LOGW(TAG, "cannot join '%s'", s_cfg->wifi[i].ssid);
+            char ssid[MOSU_CFG_SSID_MAX];
+            char pass[MOSU_CFG_PASS_MAX];
+            copy_network(i, ssid, sizeof(ssid), pass, sizeof(pass));
+            ESP_LOGW(TAG, "cannot join '%s'", ssid);
         }
     }
 
@@ -286,9 +354,11 @@ static bool run_sync(void)
         s_state = MOSU_NET_FAILED;
         radio_off_if_possible();
         ESP_LOGW(TAG, "all configured networks failed");
+        s_last_connected = false;
         return false;
     }
 
+    s_last_connected = true;
     s_state = MOSU_NET_CONNECTED;
 
     mosu_policy_geo_t geo;
@@ -325,6 +395,58 @@ static bool run_sync(void)
     return clock_ok;
 }
 
+static bool home_ap_visible(void)
+{
+    char ssids[MOSU_CFG_WIFI_MAX][MOSU_CFG_SSID_MAX];
+    uint8_t count = 0;
+
+    taskENTER_CRITICAL(&s_cfg_mux);
+    count = s_cfg->wifi_count;
+    for (uint8_t i = 0; i < count && i < MOSU_CFG_WIFI_MAX; i++) {
+        snprintf(ssids[i], sizeof(ssids[i]), "%s", s_cfg->wifi[i].ssid);
+    }
+    taskEXIT_CRITICAL(&s_cfg_mux);
+
+    if (count == 0 || !wifi_ensure_started()) {
+        return false;
+    }
+
+    wifi_scan_config_t scan_cfg = {.show_hidden = true};
+    esp_err_t err = esp_wifi_scan_start(&scan_cfg, true);
+    if (err != ESP_OK) {
+        radio_off_if_possible();
+        return false;
+    }
+
+    uint16_t found = 0;
+    esp_wifi_scan_get_ap_num(&found);
+    if (found > 20) {
+        found = 20;
+    }
+    wifi_ap_record_t *aps =
+        calloc(found ? found : 1, sizeof(wifi_ap_record_t));
+    if (!aps) {
+        radio_off_if_possible();
+        return false;
+    }
+
+    bool visible = false;
+    uint16_t got = found;
+    if (esp_wifi_scan_get_ap_records(&got, aps) == ESP_OK) {
+        for (uint16_t i = 0; i < got && !visible; i++) {
+            for (uint8_t j = 0; j < count; j++) {
+                if (strncmp((const char *)aps[i].ssid, ssids[j], 32) == 0) {
+                    visible = true;
+                    break;
+                }
+            }
+        }
+    }
+    free(aps);
+    radio_off_if_possible();
+    return visible;
+}
+
 static void net_task(void *arg)
 {
     (void)arg;
@@ -342,14 +464,42 @@ static void net_task(void *arg)
                 fail_count++;
             }
 
-            uint32_t wait = mosu_policy_next_sync_s(
-                fail_count, s_cfg->clock.sync_hours);
+            uint32_t wait =
+                mosu_policy_next_sync_s(fail_count, sync_interval_s());
             s_next_sync_s = uptime_s() + wait;
 
-            if (!ok) {
+            if (ok) {
+                s_next_presence_s = 0;
+            } else {
+                /* If no access point answered at all, look for a configured
+                 * SSID every 15 minutes.  When the owner comes home and the
+                 * radio can see it again, sync immediately instead of
+                 * waiting for the full backoff.  An auth failure means the
+                 * AP is visible: keep the normal, slower backoff so a wrong
+                 * password cannot spin the radio. */
+                bool no_ap = s_last_reason == 0 ||
+                             s_last_reason == WIFI_REASON_NO_AP_FOUND;
+                if (!s_last_connected && no_ap && s_cfg->wifi_count > 0 &&
+                    !s_cfg->clock.wifi_always_on) {
+                    s_next_presence_s = uptime_s() + PRESENCE_SCAN_S;
+                } else {
+                    s_next_presence_s = 0;
+                }
                 ESP_LOGW(TAG, "sync failed (%u in a row), next try in %u s",
                          (unsigned)fail_count, (unsigned)wait);
             }
+        }
+
+        if (s_next_presence_s != 0 &&
+            (int32_t)(uptime_s() - s_next_presence_s) >= 0) {
+            s_next_presence_s = 0;
+            if (home_ap_visible()) {
+                ESP_LOGI(TAG, "configured network is visible again, syncing");
+                s_sync_requested = true;
+                s_next_sync_s = uptime_s();
+                continue;
+            }
+            s_next_presence_s = uptime_s() + PRESENCE_SCAN_S;
         }
 
         uint32_t wait_s = 60;
@@ -443,4 +593,95 @@ uint32_t mosu_net_seconds_to_sync(void)
         return 0;
     }
     return s_next_sync_s - now;
+}
+
+esp_err_t mosu_net_scan(void)
+{
+    if (!s_cfg) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (s_state == MOSU_NET_CONNECTING || s_state == MOSU_NET_CONNECTED) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!wifi_ensure_started()) {
+        return ESP_FAIL;
+    }
+
+    wifi_scan_config_t scan_cfg = {.show_hidden = true};
+    esp_err_t err = esp_wifi_scan_start(&scan_cfg, true);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "scan start: %s", esp_err_to_name(err));
+        radio_off_if_possible();
+        return err;
+    }
+
+    uint16_t count = 0;
+    esp_wifi_scan_get_ap_num(&count);
+    if (count > 20) {
+        count = 20;
+    }
+    wifi_ap_record_t *aps =
+        calloc(count ? count : 1, sizeof(wifi_ap_record_t));
+    if (!aps) {
+        radio_off_if_possible();
+        return ESP_ERR_NO_MEM;
+    }
+
+    uint16_t got = count;
+    err = esp_wifi_scan_get_ap_records(&got, aps);
+    if (err == ESP_OK) {
+        printf("wifi: %u AP(s)\n", (unsigned)got);
+        for (uint16_t i = 0; i < got; i++) {
+            printf("      %-32s ch %2u rssi %4d auth %d\n",
+                   (const char *)aps[i].ssid, (unsigned)aps[i].primary,
+                   (int)aps[i].rssi, (int)aps[i].authmode);
+        }
+    }
+    free(aps);
+    radio_off_if_possible();
+    return err;
+}
+
+esp_err_t mosu_net_set_network(const char *ssid, const char *pass)
+{
+    if (!s_cfg || !ssid || ssid[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (strlen(ssid) >= sizeof(((wifi_sta_config_t *)0)->ssid) ||
+        (pass && strlen(pass) >= sizeof(((wifi_sta_config_t *)0)->password))) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    taskENTER_CRITICAL(&s_cfg_mux);
+    memset(&s_cfg->wifi[0], 0, sizeof(s_cfg->wifi[0]));
+    snprintf(s_cfg->wifi[0].ssid, sizeof(s_cfg->wifi[0].ssid), "%s", ssid);
+    snprintf(s_cfg->wifi[0].pass, sizeof(s_cfg->wifi[0].pass), "%s",
+             pass ? pass : "");
+    for (uint8_t i = 1; i < MOSU_CFG_WIFI_MAX; i++) {
+        memset(&s_cfg->wifi[i], 0, sizeof(s_cfg->wifi[i]));
+    }
+    s_cfg->wifi_count = 1;
+    taskEXIT_CRITICAL(&s_cfg_mux);
+
+    return ESP_OK;
+}
+
+void mosu_net_clear_networks(void)
+{
+    if (!s_cfg) {
+        return;
+    }
+    taskENTER_CRITICAL(&s_cfg_mux);
+    memset(s_cfg->wifi, 0, sizeof(s_cfg->wifi));
+    s_cfg->wifi_count = 0;
+    taskEXIT_CRITICAL(&s_cfg_mux);
+}
+
+bool mosu_net_home_ap_visible(void)
+{
+    if (!s_cfg || s_state == MOSU_NET_CONNECTING ||
+        s_state == MOSU_NET_CONNECTED) {
+        return false;
+    }
+    return home_ap_visible();
 }

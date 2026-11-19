@@ -111,8 +111,10 @@ esp_err_t mosu_board_audio_init(void)
     };
     ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(s_tx, &std_cfg), TAG,
                         "i2s std");
-    /* The channel is enabled on demand, so an idle watch does not clock the
-     * I2S bus (and the codec stays in its low power state). */
+    /* The channel is enabled before opening the codec stream because the
+     * IDF reconfig functions expect a running channel.  esp_codec_dev
+     * disables it again in close(); we only track that fact and must not
+     * disable it a second time. */
     s_channel_enabled = false;
 
     audio_codec_i2s_cfg_t i2s_cfg = {
@@ -250,10 +252,8 @@ esp_err_t mosu_board_audio_idle(void)
         return ESP_OK;
     }
     esp_codec_dev_close(s_codec);
-    if (s_tx && s_channel_enabled) {
-        i2s_channel_disable(s_tx);
-        s_channel_enabled = false;
-    }
+    /* esp_codec_dev_close() has already disabled the I2S channel. */
+    s_channel_enabled = false;
     return ESP_OK;
 }
 
@@ -312,10 +312,7 @@ esp_err_t mosu_board_audio_play_wav(const char *path, uint8_t volume)
     }
 
     esp_codec_dev_close(s_codec);
-    if (s_tx && s_channel_enabled) {
-        i2s_channel_disable(s_tx);
-        s_channel_enabled = false;
-    }
+    s_channel_enabled = false;
     fclose(file);
     return err;
 }

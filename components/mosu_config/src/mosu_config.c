@@ -217,13 +217,14 @@ void mosu_config_defaults(mosu_config_t *cfg)
     cfg->status.wifi_fail_slash = true;
 
     copy_str(cfg->clock.timezone, sizeof(cfg->clock.timezone),
-             "EET-2EEST,M3.5.0/3,M10.5.0/4");
+             "Europe/Bucharest");
     cfg->clock.auto_timezone = true;
     copy_str(cfg->clock.geo_url, sizeof(cfg->clock.geo_url),
              "http://ip-api.com/line/?fields=timezone,offset");
     copy_str(cfg->clock.ntp1, sizeof(cfg->clock.ntp1), "pool.ntp.org");
     copy_str(cfg->clock.ntp2, sizeof(cfg->clock.ntp2), "time.google.com");
     cfg->clock.sync_hours = 6;
+    cfg->clock.sync_per_day = 0; /* 0 = use sync_hours */
     cfg->clock.wifi_always_on = false;
     cfg->clock.manual_time[0] = '\0';
 
@@ -516,6 +517,12 @@ static void apply_key(mosu_config_t *cfg, section_t section, const char *key,
                 return;
             }
             cfg->clock.sync_hours = (uint16_t)ival;
+        } else if (!strcasecmp(key, "sync_per_day")) {
+            if (!set_int(value, 0, 24, &ival)) {
+                report_error(report, "invalid number for %s", key);
+                return;
+            }
+            cfg->clock.sync_per_day = (uint8_t)ival;
         } else if (!strcasecmp(key, "wifi_always_on")) {
             if (!parse_bool(value, &bval)) {
                 report_error(report, "invalid boolean for %s", key);
@@ -761,9 +768,12 @@ void mosu_config_sanitize(mosu_config_t *cfg)
     if (cfg->clock.sync_hours > 168) {
         cfg->clock.sync_hours = 168;
     }
+    if (cfg->clock.sync_per_day > 24) {
+        cfg->clock.sync_per_day = 24;
+    }
     if (!mosu_config_timezone_ok(cfg->clock.timezone)) {
         copy_str(cfg->clock.timezone, sizeof(cfg->clock.timezone),
-                 "EET-2EEST,M3.5.0/3,M10.5.0/4");
+                 "Europe/Bucharest");
     }
 
     if (cfg->announce.volume > 100) {

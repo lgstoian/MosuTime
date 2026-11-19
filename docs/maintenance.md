@@ -62,6 +62,7 @@ Practical rules, all enforced by `components/mosu_config`:
 | `clock.auto_timezone` | bool | true | Ask the network for the zone by IP. An unknown name falls back to the returned UTC offset. |
 | `clock.geo_url` | URL | `http://ip-api.com/line/?fields=timezone,offset` | Timezone service. Plain HTTP is cheaper; an explicit `https://` URL is still supported. |
 | `clock.sync_hours` | 1…168 | 6 | Hours between successful syncs. The first three failures retry after 5, 15 and 30 minutes. |
+| `clock.sync_per_day` | 0…24 | 0 | When 1…24, overrides `sync_hours` and syncs that many times a day (5 = every 4.8 h). 0 means "use `sync_hours`". |
 | `clock.wifi_always_on` | bool | false | `true` keeps the radio on and costs much more. Leave it false. |
 | `clock.manual_time` | `"YYYY-MM-DD HH:MM"` | empty | Fallback only when there is no valid RTC and no network. |
 | `wifi.networkN_ssid` / `_pass` | text, N=1…8 | — | Tried in order, 15 s each. 2.4 GHz networks only. |
@@ -112,6 +113,22 @@ in order, 15 s per network, then the radio is switched off. The ESP32-S3 is
 2.4 GHz only; a 5 GHz-only SSID will never connect. WPA2 and open networks are
 accepted; WPA3 has not been tested on this build.
 
+If the card slot is not reachable, the console can provision one network
+without a card (it is saved to NVS; the card config still wins on the next
+boot with a card):
+
+```text
+wifi camera parola
+wifi status
+wifi scan
+wifi presence
+wifi clear
+```
+
+`wifi status` prints SSIDs only, never passwords. `wifi scan` lists the
+visible APs with channel, RSSI and auth mode. `wifi presence` checks whether a
+configured SSID is in range without associating.
+
 After a reboot, `sync` forces an immediate attempt:
 
 ```text
@@ -122,7 +139,10 @@ Watch the console for the join, `network timezone: ...` and `clock synced`.
 The Wi-Fi icon is grey before the first success, green after a success, and
 red with a slash after a failure. A failure does not stop the clock; it keeps
 running from the PCF85063 and retries after 5, 15 and 30 minutes before the
-normal `sync_hours` interval resumes.
+normal interval resumes. If no configured access point is visible, a
+15-minute presence scan notices when it comes back and triggers a sync; a
+wrong password keeps the slower backoff. No Wi-Fi failure resets or panics the
+watch.
 
 If the watch is used in a different country, leave `auto_timezone = true` so
 the IP lookup can set the zone. If you prefer a fixed zone, set
@@ -180,14 +200,18 @@ recovery path if an experiment goes wrong.
 
 ```sh
 idf.py build
-idf.py -p COM5 flash monitor
+idf.py -p COM11 flash monitor
 ```
 
 Windows wrapper:
 
 ```powershell
-.\tools\build.ps1 -Port COM5 -Flash -Monitor
+.\tools\build.ps1 -Port COM11 -Flash -Monitor
 ```
+
+The board's USB-C is the ESP32-S3 native USB, and the firmware console is
+USB Serial/JTAG, so the same COM port carries flashing, logs and console
+commands. UART0 is only on the reserved pads.
 
 The build uses ESP-IDF 5.5.x and the 32 MB partition table in
 `partitions.csv`. Flashing writes the bootloader, the partition table and the
@@ -243,7 +267,10 @@ can corrupt FAT, so remove the card only when the watch is off.
 | `config: invalid number for brightness` | The value is not a number. Ranges are clamped, text is an error. Fix that line. |
 | Config changes do nothing | File must be `mosu.cfg` in the card root, card mounted, and the watch rebooted. |
 | `--` instead of the time | No valid RTC and no sync yet. `time` shows validity; `sync` forces an attempt; `settime YYYY-MM-DD HH:MM` sets it manually. |
-| Wi-Fi icon red with a slash | Wrong SSID/password, 5 GHz-only network, or out of range. `sync` retries; the clock keeps running. |
+| Wi-Fi icon red with a slash | Wrong SSID/password, 5 GHz-only network, or out of range. `sync` retries; the clock keeps running. If the AP was simply not visible, a 15-minute presence scan triggers a sync when it returns. |
+| No console input over USB | The firmware must use USB Serial/JTAG as the primary console; the secondary port is output-only. Check `CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y` and `wifi`/`help` after flashing. |
+| Watch stays in download (`boot:0x23`) | Release BOOT and power-cycle (long-press PWR ~6 s, then click PWR), or unplug/replug USB without touching BOOT. |
+| Status icons clipped by the glass | The AMOLED has rounded corners; keep `MOSU_SCREEN_MARGIN` at 48 px and `MOSU_STATUS_Y` at 30 px. |
 | Voice is silent | `voice/` missing, wrong file names, not mono 16-bit, or `volume = 0`. Look for `missing clip:` or `need mono 16 bit wav:` in the log. |
 | Battery percentage jumps | The percentage comes from battery voltage, not a coulomb counter. It moves in steps and is less accurate under load. Use a PPK2 for energy measurements. |
 | Watch will not charge | Cable, charger, battery connector. `status`/`pmu` show `charging` and `vbus`; a PMU that does not answer is a hardware fault. |

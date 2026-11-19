@@ -35,14 +35,19 @@ battery bucket:
 | ESP32-S3, PSRAM, flash, Wi-Fi | yes |
 | CO5300 QSPI panel | observed with the part in `panel/`, pixels reconstructed from the log |
 | FT3168 touch, 0x38, INT GPIO 38 | part in `touch/`: tap, double tap, hold, coordinates |
-| QMI8658 accelerometer, 0x6A | part in `imu/`: `raise`, `lower`, `tilt:x,y,z` |
+| QMI8658 accelerometer, 0x6B | part in `imu/`: `raise`, `lower`, `tilt:x,y,z`; always little-endian, CTRL1 is not modelled |
 | AXP2101, PCF85063, ES8311 I2C | `regfile` in `board.json`; the `chips` part on the interactive board |
 | SD card | not modelled; the emulator build has `CONFIG_MOSU_SKIP_SD=y` |
 | Light sleep on S3 | not modelled; the emulator build disables PM |
 | Audio output | not modelled; the phrase builder logs the missing clips instead |
 
 The production build is untouched: `tools/sdkconfig.emulator` and
-`CONFIG_MOSU_SKIP_SD` only apply to the `build-emu` directory.
+`CONFIG_MOSU_SKIP_SD` only apply to the `build-emu` directory.  The emulator
+overlay also keeps **UART0** as the primary console; the production board
+uses USB Serial/JTAG because that is the only reachable USB port.  The virtual
+QMI8658 ignores the CTRL1 write and always returns little-endian data, so a
+byte-order regression has to be caught on the real board or with a part that
+models CTRL1.
 
 ## The interactive board
 
@@ -54,7 +59,7 @@ look like?".
 | Part (board key) | What it is | Inputs |
 | --- | --- | --- |
 | `touch` | FT3168 at 0x38 on SCL 14 / SDA 15, driving INT on GPIO 38 low while pressed | `tap` (80 ms press), `double` (two 80 ms taps 250 ms apart), `hold`, `release`, `set:x=<n>`, `set:y=<n>`, `set:x=<n>,y=<n>` |
-| `imu` | QMI8658 at 0x6A, WHO_AM_I `0x05`, ±4 g (8192 LSB/g) | `raise` (x=1,y=0,z=0), `lower` (x=0,y=0,z=1), `tilt:x,y,z` in g |
+| `imu` | QMI8658 at 0x6B, WHO_AM_I `0x05`, ±4 g (8192 LSB/g) | `raise` (x=1,y=0,z=0), `lower` (x=0,y=0,z=1), `tilt:x,y,z` in g |
 | `chips` | AXP2101 0x34, PCF85063 0x51 and ES8311 0x18 register files | none; mirrors the values `board.json` preloads |
 | `panel` | the CO5300 QSPI panel, unchanged | none |
 
@@ -250,7 +255,7 @@ The `regfile` devices answer with the values in `board.json`:
 
 * `0x34` AXP2101: status `0x28` (battery present, VBUS good), 3.9 V battery;
 * `0x51` PCF85063: 2026-11-10 07:41 UTC, which is 09:41 in Bucharest;
-* `0x6A` QMI8658: `WHO_AM_I = 0x05`;
+* `0x6B` QMI8658: `WHO_AM_I = 0x05`;
 * `0x38` FT3168 and `0x18` ES8311: an ACK and zeroes are enough for init.
 
 On `board-interactive.json` the same three register files are served by the

@@ -26,7 +26,7 @@
         "SCL": 14,
         "SDA": 15
       },
-      "addr": "0x6A"
+      "addr": "0x6B"
     },
     "chips": {
       "module": "chips/target/wasm32-unknown-unknown/release/mosu_chips.wasm",

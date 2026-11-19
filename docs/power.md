@@ -79,6 +79,12 @@ measure.
   spends more energy failing than succeeding.
 * **Audio** is a short, high-current burst. At eight announcements a day it is
   noise in the budget; at a hundred a day it is not.
+* **Presence scans** are not in the model yet. When no configured SSID is
+  visible, the net task scans for one every 15 minutes. A 2 s scan at about
+  120 mA averages roughly 0.27 mA over the 15-minute window; that is not
+  negligible against a 3.18 mA total. Measure it before promising runtime,
+  and increase the interval or disable `wifi_always_on`-style retries if it
+  is too high.
 
 ## States
 
@@ -104,9 +110,11 @@ reading outside the band is a finding; a reading inside it still needs to be
 recorded.
 
 The CPU is configured for 160/80 MHz and light sleep in `app_main.c`; the
-`NO_LIGHT_SLEEP` lock is held only while the panel is on. Deep sleep is not
-used: the touch wake and the wrist-raise poll must stay live, and light sleep
-keeps the CPU, the I2C bus and the panel state intact across a wake.
+display's `NO_LIGHT_SLEEP` lock is held only while the panel is on. The
+native-USB console adds a second lock while a host is connected (see the
+measurement warnings). Deep sleep is not used: the touch wake and the
+wrist-raise poll must stay live, and light sleep keeps the CPU, the I2C bus
+and the panel state intact across a wake.
 
 ## Forcing a state
 
@@ -147,6 +155,10 @@ Two practical warnings:
    `power idle`. Do not leave it on for a 24 h soak. If the build in front of
    you still applies the activity timer, set `screen_on_ms = 300000`
    temporarily for the measurement.
+3. The native-USB console holds `NO_LIGHT_SLEEP` while a host is connected
+   (`CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION`). `pm` shows the
+   `usb_serial_jtag` lock active. Unplug USB, or use the UART0 pads, for a
+   real light-sleep current. The option has no effect when the cable is out.
 
 ## Measurement with a Nordic PPK2
 
@@ -201,6 +213,10 @@ exists, or to compare two brightness settings coarsely. **Do not put USB-meter
 numbers in the measurement table** except as a charging-current note.
 
 ## Measurement table
+
+Session 1 had no battery and no PPK2, so no current was measured; the table
+below is still blank. The display, touch, audio and Wi-Fi states were exercised
+functionally, not electrically.
 
 Copy this table into the build record and fill it in. Leave a cell blank rather
 than guessing.
@@ -257,6 +273,9 @@ repository today and should be filled in first:
 * ES8311 + PA quiescent current when parked (assumed zero between clips);
 * SD card idle current (assumed zero; cards differ);
 * AXP2101 quiescent current and the accuracy of its battery percentage;
-* the real length of an announcement and of a failed sync.
+* the real length of an announcement and of a failed sync;
+* the average cost of the 15-minute presence scan while away from home;
+* the light-sleep floor once the USB console is unplugged (the bench build
+  deliberately keeps the USB link alive while a host is attached).
 
 Until those are measured, treat every runtime statement as a hypothesis.

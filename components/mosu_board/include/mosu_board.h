@@ -36,6 +36,9 @@ extern "C" {
 #define MOSU_PIN_SD_CLK 2
 #define MOSU_PIN_SD_CMD 1
 #define MOSU_PIN_SD_D0 3
+/* The socket also carries the SPI chip select on DAT3/CS.  SD mode needs
+ * that line high; leaving it floating can make a card enter SPI mode. */
+#define MOSU_PIN_SD_CS 17
 
 #define MOSU_PIN_I2S_MCLK 16
 #define MOSU_PIN_I2S_BCLK 41

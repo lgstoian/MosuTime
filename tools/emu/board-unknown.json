@@ -41,7 +41,7 @@
     "imu": {
       "type": "regfile",
       "i2c": 0,
-      "addr": "0x6A",
+      "addr": "0x6B",
       "regs": {
         "0x00": "0x05"
       }

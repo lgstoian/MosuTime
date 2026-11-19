@@ -47,11 +47,16 @@ ESP-IDF 5.5.x installation first, or use `tools/build.ps1`.
 # Firmware (production build)
 idf.py set-target esp32s3        # only on a fresh checkout/build directory
 idf.py build
-idf.py -p COM5 flash monitor
+idf.py -p COM11 flash monitor
 
 # Windows wrapper
-.\tools\build.ps1 -Port COM5 -Flash -Monitor
+.\tools\build.ps1 -Port COM11 -Flash -Monitor
 ```
+
+The board's only reachable USB port is the ESP32-S3 native USB, so the
+production console is USB Serial/JTAG; UART0 is on reserved pads.
+`tools/build.ps1` also puts the IDF-managed Xtensa toolchain ahead of an
+espup/rustup one and does not abort on the normal stderr from `export.ps1`.
 
 ```sh
 # Host tests: the fast, hardware-free safety net

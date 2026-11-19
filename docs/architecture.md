@@ -57,6 +57,11 @@ its answers, which is why those rules are covered by the host tests.
 9. From then on the session state machine owns the screen, and the console can
    drive test patterns and power states for bring-up.
 
+The board's only reachable USB port is the ESP32-S3 native USB on GPIO19/20.
+The production build therefore uses **USB Serial/JTAG as the primary
+console**; UART0 is only on reserved pads. The emulator overlay switches back
+to UART0 because esp-emu does not model the USB peripheral.
+
 ## The screen state machine
 
 `app_main` owns two states.
@@ -140,17 +145,33 @@ The default `wifi_always_on = false` makes the radio a guest:
 
 ```
 connect to network1..networkN (15 s each)
+  -> wait for DHCP (IP_EVENT_STA_GOT_IP)
   -> geolocation (8 s timeout, one retry on a transient failure)
   -> SNTP (15 s timeout, two servers)
   -> esp_wifi_disconnect() + esp_wifi_stop()
 ```
 
-If every network fails, the state becomes `FAILED` and the icon turns red. The
-retry schedule is not `sync_hours` yet: the first three failures retry after 5,
-15 and 30 minutes, then the normal interval resumes. A success resets the
-counter. This keeps a transient router reboot from leaving the clock stale for
-hours. The watch never blocks the UI on the network: `mosu_net` runs in its own
-task and the clock keeps ticking from the RTC.
+The DHCP wait matters: a geolocation request sent right after association
+has no resolver and fails with `getaddrinfo() returns 202`.
+
+If every network fails, the state becomes `FAILED` and the icon turns red.
+The retry schedule is the first three failures at 5, 15 and 30 minutes, then
+the normal interval resumes. A success resets the counter. This keeps a
+transient router reboot from leaving the clock stale for hours. The watch
+never blocks the UI on the network: `mosu_net` runs in its own task and the
+clock keeps ticking from the RTC. A failed join is a logged warning, not a
+panic; a watch with no configured network simply stays `IDLE`.
+
+The normal interval is `clock.sync_hours` (1..168 h) or, when set,
+`clock.sync_per_day` (1..24), which is more natural for "sync four times a
+day" and supports intervals that are not whole hours (five per day = 4.8 h).
+
+When the failure reason is `NO_AP_FOUND`, the net task schedules a short
+presence scan every 15 minutes. The scan looks for any configured SSID and
+does not associate; if the network comes back, a sync is triggered
+immediately. An auth or handshake failure means the AP is visible, so the
+normal backoff is kept instead of spinning the radio against a wrong
+password.
 
 ## Failure behaviour
 
@@ -158,7 +179,7 @@ task and the clock keeps ticking from the RTC.
 | --- | --- |
 | No SD card | cached config from NVS, no voice, clock still works |
 | No `mosu.cfg` | same as above; defaults on first boot |
-| No Wi-Fi | RTC keeps time; Wi-Fi icon red; retries later |
+| No Wi-Fi / wrong password | RTC keeps time; Wi-Fi icon red; logged warning only; retries later and a presence scan notices when the network returns |
 | No RTC and no network | `--:--` until `manual_time` or a sync |
 | No voice clips | silent announcement, screen and clock unaffected |
 | PMU missing | battery icon outline in grey |
@@ -173,7 +194,7 @@ Three layers, each catching a different class of mistake:
    `mosu_policy` and the INI parser with a normal C compiler and check the
    formatting, phrase rules, battery curve, tap/wrist state machines, the
    screen/session rules, timezone offsets/backoff, the BMP writer and config
-   edge cases (440 checks, including fuzzed config documents). They are also
+   edge cases (450 checks, including fuzzed config documents). They are also
    the fastest way to change a rule: no ESP-IDF, no board.
 2. **Desktop simulator** (`sim/`) renders the real layout constants and the
    real seven-segment code into BMP files, so a visual change can be reviewed
@@ -198,6 +219,8 @@ Only `components/mosu_board` mentions this hardware. A port must provide:
   (`mosu_board_display_start`, `mosu_board_display_on/off`,
   `mosu_board_brightness_set`, `mosu_board_touch_active`);
 * an accelerometer read in g, a UTC RTC read/write, and a WAV player;
+* a card slot: this board's TF socket also carries the SPI chip select on
+  DAT3/CS (GPIO17), so it is driven high before the 1-bit SDMMC mount;
 * the pin defines in `mosu_board.h`.
 
 Everything above the board - layout, digits, colours, phrases, config, power

@@ -187,7 +187,14 @@ esp_err_t mosu_board_display_start(void)
         },
     };
 
+    /* esp_lvgl_port calls esp_lcd_panel_swap_xy() unconditionally, and the
+     * SH8601 driver logs E even when swap_axes is false.  Silence that one
+     * known false error for the duration of the call; keep the return value
+     * check below as the real verdict. */
+    esp_log_level_t sh8601_level = esp_log_level_get("sh8601");
+    esp_log_level_set("sh8601", ESP_LOG_NONE);
     s_display = lvgl_port_add_disp(&disp_cfg);
+    esp_log_level_set("sh8601", sh8601_level);
     if (!s_display) {
         ESP_LOGE(TAG, "lvgl_port_add_disp failed");
         return ESP_FAIL;

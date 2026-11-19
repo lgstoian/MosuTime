@@ -33,6 +33,20 @@ esp_err_t mosu_net_start(const mosu_config_t *cfg);
 
 void mosu_net_status(mosu_net_status_t *out);
 
+/* Replace the runtime network list with one network.  Used by the console
+ * when there is no SD card to hold mosu.cfg; the caller persists the config
+ * to NVS.  The password is never logged or printed. */
+esp_err_t mosu_net_set_network(const char *ssid, const char *pass);
+void mosu_net_clear_networks(void);
+
+/* Bring-up helper: start the radio, scan, print SSID/channel/RSSI/authmode,
+ * then turn the radio off again unless wifi_always_on is set. */
+esp_err_t mosu_net_scan(void);
+
+/* Bring-up helper: scan once and report whether any configured SSID is in
+ * range, without associating. */
+bool mosu_net_home_ap_visible(void);
+
 /* Ask the network task to sync as soon as possible (used by the console). */
 void mosu_net_request_sync(void);
 

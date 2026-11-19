@@ -28,7 +28,8 @@ așteptați să se golească de tot.
 * **Roșu, cu o linie peste:** ultima încercare a eșuat. Ceasul continuă să
   arate ora pe care o știe.
 
-Nu trebuie să faceți nimic. Ceasul încearcă din nou singur, mai târziu.
+Nu trebuie să faceți nimic. Ceasul încearcă din nou singur, mai târziu, iar
+când reveniți acasă și rețeaua este din nou aproape, se reconectează singur.
 
 ## Cum auziți ora
 
