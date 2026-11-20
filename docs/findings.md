@@ -46,6 +46,7 @@ changed to make the emulator work.
 | 27 | Display-off left the AMOLED driver biased all night | yes | pending: 6 h+ drain comparison |
 | 28 | A 35 deg / 150 ms wrist raise woke the face far too often | yes | done: 50 deg / 300 ms / 5 s and learned steps |
 | 29 | USB console open reset the CPU and wiped the counters | yes: RTC no-init | done: `stats` survives reconnects |
+| 30 | Half a white screen and a freeze when the face woke | yes | done: 100 forced off/on cycles |
 
 ## 1. SD mount blocking boot
 
@@ -797,6 +798,31 @@ external RTC, so a reset does not distort the window.
 
 **Verification.** After `stats reset`, waiting two minutes and reconnecting
 shows `up 0h02m` with the same baseline percentage.
+
+## 30. Half a white screen and a freeze when the face woke
+
+**Symptom.** After v1.1.0 the watch sometimes came back with roughly a third of
+the panel white and the UI unresponsive, then recovered later or stayed stuck.
+
+**Cause.** Three things combined. The wake path called `lv_refr_now()` from the
+**app task** while holding the LVGL port lock; the QSPI flush is asynchronous,
+so the call returned after a few of the 50-line buffers and the display was
+switched on mid-frame — the untouched third still held the undefined GRAM left
+by sleep-in. The renderer also ran on the app task's **3584-byte stack**, and
+the LVGL task could not proceed while the app task held the lock.
+
+**Fix.** The app task only invalidates; the 12 KB LVGL task renders. Sleep-in
+is reverted: display-off keeps the last frame, so a wake can never show
+undefined pixels. The main task stack is 8192 bytes, and a dedicated power
+manager now owns the panel and the sleep lock.
+
+**Fix lives in.** [`main/app_main.c`](../main/app_main.c) (`screen_on`),
+[`components/mosu_power/src/mosu_power.c`](../components/mosu_power/src/mosu_power.c),
+[`components/mosu_board/src/mosu_board_display.c`](../components/mosu_board/src/mosu_board_display.c).
+
+**Verification.** 100 forced `power screen off`/`power screen on` cycles
+completed with no hang, and a screenshot taken after the cycles is a complete
+410x502 face.
 
 ## Adding a finding
 

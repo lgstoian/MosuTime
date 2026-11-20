@@ -4,6 +4,7 @@ idf_component_register(
     REQUIRES
         mosu_config
         mosu_policy
+        mosu_tasks
         mosu_time
         esp_wifi
         esp_netif

@@ -114,15 +114,21 @@ main/app_main.c                 boot order, power state machine, wiring
       |
 mosu_time  mosu_net  mosu_audio  mosu_ui  mosu_diag     services
       |
-mosu_board                     the only board-specific component
+mosu_power                    panel, DFS and sleep lock
+      |
+mosu_hal                      hardware contract (display, PMU, RTC)
+      |
+mosu_board                    the only board-specific component
       |
 ESP-IDF drivers, LVGL, esp_lcd, esp_codec_dev
 
 mosu_core     pure C: time formatting, phrases, battery curve, tap/wrist,
               seven-segment digit drawing, BMP writer
 mosu_session  pure C: screen/tap/battery/wifi-icon state machine
-mosu_policy   pure C: timezone offset/geo parsing, failed-sync backoff
+mosu_policy   pure C: timezone offset/geo parsing, failed-sync backoff,
+              learned Wi-Fi presence and screen-duty policy
 mosu_config   pure C INI parser; only mosu_config_store.c owns NVS
+mosu_tasks    task creation, stack policy and the high-water report
 ```
 
 - **Pure C, host-testable:** `components/mosu_core`,

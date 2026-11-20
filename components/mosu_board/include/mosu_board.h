@@ -94,10 +94,6 @@ esp_err_t mosu_board_init(void);
 esp_err_t mosu_board_display_start(void);
 lv_display_t *mosu_board_display(void);
 esp_err_t mosu_board_display_on(void);
-/* Sleep out of the panel without switching the display on yet: the caller
- * draws the first frame while the panel is still dark, then calls display_on
- * so no stale or undefined GRAM content is ever visible. */
-esp_err_t mosu_board_display_prepare_wake(void);
 esp_err_t mosu_board_display_off(void);
 esp_err_t mosu_board_brightness_set(uint8_t percent);
 bool mosu_board_touch_active(void);

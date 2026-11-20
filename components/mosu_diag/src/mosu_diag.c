@@ -37,6 +37,7 @@
 #include "mosu_core/mosu_core.h"
 #include "mosu_diag.h"
 #include "mosu_net.h"
+#include "mosu_tasks.h"
 #include "mosu_time.h"
 #include "mosu_ui.h"
 
@@ -393,8 +394,8 @@ static void handle_line(char *line)
     if (!strcmp(line, "help") || !strcmp(line, "?")) {
         printf("commands:\n");
         printf("  status stats [reset] time sync say settime bright vol tap reboot version\n");
-        printf("  i2c pmu rtc imu pm heap tasks display config\n");
-        printf("  test screen [colors|grid|corners|off]\n");
+        printf("  i2c pmu rtc imu pm heap tasks display config mem\n");
+        printf("  test screen [colors|grid|corners|off] | scene clock|blank\n");
         printf("  test touch | test audio | sd remount | sd verbose | sd dump\n");
         printf("  sd format yes | receive <path> <size> [/crc] | md <path>\n");
         printf("  ls [path] | rm <path> | rx bench <bytes>\n");
@@ -647,6 +648,20 @@ static void handle_line(char *line)
         }
     } else if (!strcmp(line, "test screen")) {
         printf("usage: test screen [colors|grid|corners|off]\n");
+    } else if (!strncmp(line, "scene ", 6)) {
+        const char *name = line + 6;
+        if (!strcmp(name, "clock")) {
+            mosu_ui_set_scene(MOSU_UI_SCENE_CLOCK);
+            printf("scene: clock\n");
+        } else if (!strcmp(name, "blank")) {
+            mosu_ui_set_scene(MOSU_UI_SCENE_BLANK);
+            printf("scene: blank\n");
+        } else {
+            printf("usage: scene clock|blank\n");
+        }
+    } else if (!strcmp(line, "mem")) {
+        mosu_tasks_report();
+        printf("mem   : reset reason %d\n", (int)esp_reset_reason());
     } else if (!strncmp(line, "test screen ", 12)) {
         test_screen(line + 12);
     } else if (!strcmp(line, "test touch")) {
@@ -805,7 +820,14 @@ esp_err_t mosu_diag_start(mosu_config_t *cfg)
     }
 #endif
 
-    if (xTaskCreate(diag_task, "mosu_diag", 8192, NULL, 2, NULL) != pdPASS) {
+    if (mosu_task_start(&(mosu_task_cfg_t){
+                             .name = "mosu_diag",
+                             .fn = diag_task,
+                             .stack = 8192,
+                             .priority = 2,
+                             .core = tskNO_AFFINITY,
+                         },
+                         NULL) != ESP_OK) {
         return ESP_ERR_NO_MEM;
     }
     ESP_LOGI(TAG, "console started");

@@ -66,3 +66,9 @@ CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION=y
 # --- Logging ----------------------------------------------------------------
 CONFIG_LOG_DEFAULT_LEVEL_INFO=y
 CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
+
+# The app task calls LVGL and board APIs; 3.5 KB is too tight.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+
+# Let Wi-Fi/LWIP large buffers spill into PSRAM; internal RAM stays for DMA.
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y

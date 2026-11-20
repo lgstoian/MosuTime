@@ -40,6 +40,7 @@ static uint32_t s_tap_until;
 static uint32_t s_tap_ms;
 
 static mosu_ui_test_t s_test;
+static mosu_ui_scene_t s_scene = MOSU_UI_SCENE_CLOCK;
 
 static mosu_ui_touch_cb_t s_touch_cb;
 static void *s_touch_user;
@@ -352,6 +353,10 @@ static void draw_event_cb(lv_event_t *event)
         return;
     }
 
+    if (s_scene == MOSU_UI_SCENE_BLANK) {
+        return;
+    }
+
     if (s_test != MOSU_UI_TEST_NONE) {
         draw_test_pattern(layer, s_test);
         return;
@@ -531,6 +536,24 @@ void mosu_ui_set_touch_cb(mosu_ui_touch_cb_t cb, void *user)
     s_touch_cb = cb;
 }
 
+void mosu_ui_set_scene(mosu_ui_scene_t scene)
+{
+    if (scene != MOSU_UI_SCENE_CLOCK && scene != MOSU_UI_SCENE_BLANK) {
+        return;
+    }
+    s_scene = scene;
+    s_test = MOSU_UI_TEST_NONE;
+    if (s_screen && lvgl_port_lock(1000)) {
+        invalidate();
+        lvgl_port_unlock();
+    }
+}
+
+mosu_ui_scene_t mosu_ui_scene(void)
+{
+    return s_scene;
+}
+
 void mosu_ui_refresh(void)
 {
     if (!s_screen) {
@@ -538,19 +561,6 @@ void mosu_ui_refresh(void)
     }
     if (lvgl_port_lock(1000)) {
         invalidate();
-        lvgl_port_unlock();
-    }
-}
-
-void mosu_ui_render_now(void)
-{
-    lv_display_t *display = lv_display_get_default();
-    if (!s_screen || !display) {
-        return;
-    }
-    if (lvgl_port_lock(1000)) {
-        invalidate();
-        lv_refr_now(display);
         lvgl_port_unlock();
     }
 }

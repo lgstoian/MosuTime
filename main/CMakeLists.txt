@@ -8,6 +8,8 @@ idf_component_register(
         mosu_core
         mosu_diag
         mosu_net
+        mosu_policy
+        mosu_power
         mosu_session
         mosu_time
         mosu_ui

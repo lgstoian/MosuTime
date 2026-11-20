@@ -22,6 +22,7 @@
 
 #include "mosu_audio.h"
 #include "mosu_board.h"
+#include "mosu_tasks.h"
 
 static const char *TAG = "mosu_audio";
 
@@ -60,8 +61,14 @@ esp_err_t mosu_audio_start(const mosu_config_t *cfg)
         s_pm_lock = NULL;
     }
 
-    if (xTaskCreate(audio_task, "mosu_audio", 6144, NULL, 6, &s_task) !=
-        pdPASS) {
+    if (mosu_task_start(&(mosu_task_cfg_t){
+                             .name = "mosu_audio",
+                             .fn = audio_task,
+                             .stack = 6144,
+                             .priority = 6,
+                             .core = tskNO_AFFINITY,
+                         },
+                         &s_task) != ESP_OK) {
         s_task = NULL;
         return ESP_ERR_NO_MEM;
     }

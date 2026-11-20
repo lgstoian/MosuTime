@@ -51,9 +51,17 @@ void mosu_ui_set_touch_cb(mosu_ui_touch_cb_t cb, void *user);
 /* Force a full repaint; used every time the panel is switched back on. */
 void mosu_ui_refresh(void);
 
-/* Render and flush synchronously.  The wake path uses it while the panel is
- * still dark, so sleep-in cannot show undefined GRAM content. */
-void mosu_ui_render_now(void);
+/*
+ * The display manager has exactly two scenes, and the wearer only ever sees
+ * the clock.  BLANK is for maintenance: panel lit, black glass, no digits.
+ */
+typedef enum {
+    MOSU_UI_SCENE_CLOCK = 0,
+    MOSU_UI_SCENE_BLANK,
+} mosu_ui_scene_t;
+
+void mosu_ui_set_scene(mosu_ui_scene_t scene);
+mosu_ui_scene_t mosu_ui_scene(void);
 
 /*
  * Draw a bring-up pattern instead of the clock.  The patterns are absolute:

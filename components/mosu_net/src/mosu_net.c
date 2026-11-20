@@ -28,6 +28,7 @@
 
 #include "mosu_net.h"
 #include "mosu_policy.h"
+#include "mosu_tasks.h"
 #include "mosu_time.h"
 
 static const char *TAG = "mosu_net";
@@ -579,7 +580,14 @@ esp_err_t mosu_net_start(const mosu_config_t *cfg)
     ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), TAG, "mode");
     ESP_RETURN_ON_ERROR(esp_wifi_set_ps(WIFI_PS_MIN_MODEM), TAG, "ps");
 
-    if (xTaskCreate(net_task, "mosu_net", 6144, NULL, 4, &s_task) != pdPASS) {
+    if (mosu_task_start(&(mosu_task_cfg_t){
+                             .name = "mosu_net",
+                             .fn = net_task,
+                             .stack = 6144,
+                             .priority = 4,
+                             .core = tskNO_AFFINITY,
+                         },
+                         &s_task) != ESP_OK) {
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;

@@ -14,7 +14,6 @@
 #include "esp_log.h"
 #include "esp_attr.h"
 #include "esp_lvgl_port.h"
-#include "esp_pm.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -30,6 +29,7 @@
 #include "mosu_diag.h"
 #include "mosu_net.h"
 #include "mosu_policy.h"
+#include "mosu_power.h"
 #include "mosu_session.h"
 #include "mosu_time.h"
 #include "mosu_ui.h"
@@ -89,8 +89,6 @@ static void stats_init(void)
     s_boot_pct_set = false;
     s_boot_count = 1;
 }
-
-static esp_pm_lock_handle_t s_display_lock;
 
 static mosu_session_t s_session;
 static portMUX_TYPE s_session_mux = portMUX_INITIALIZER_UNLOCKED;
@@ -205,16 +203,11 @@ static void screen_on(bool via_touch)
         return;
     }
 
-    /* Sleep out first, but keep the display dark until the first frame is
-     * rendered: sleep-in loses the GRAM, so an early display-on would show
-     * undefined pixels for a frame. */
+    /* The panel keeps its last frame while the display is off, so switching
+     * it on shows the clock immediately; the LVGL task redraws afterwards.
+     * The power manager owns the panel, brightness and the sleep lock. */
     if (s_display_ok) {
-        mosu_board_display_prepare_wake();
-        mosu_board_enable_touch_wake(false);
-    }
-
-    if (s_display_lock) {
-        esp_pm_lock_acquire(s_display_lock);
+        mosu_power_screen_on();
     }
 
     if (s_have_ui) {
@@ -225,17 +218,10 @@ static void screen_on(bool via_touch)
             lvgl_port_resume();
             s_lvgl_stopped = false;
         }
-        mosu_ui_render_now();
-        /* lv_refr_now queues the QSPI flush; switching the display on before
-         * the transfer finishes is what showed half a white frame. */
-        vTaskDelay(pdMS_TO_TICKS(80));
-    }
-
-    if (s_display_ok) {
-        mosu_board_display_on();
-        /* Brightness is restored on every wake: switching the panel off
-         * sets it to zero. */
-        mosu_board_brightness_set(s_cfg.display.brightness);
+        /* Only invalidate: the LVGL task owns rendering.  Rendering from this
+         * task while holding the port lock returned mid-frame and overflowed
+         * the 3.5 KB app stack. */
+        mosu_ui_refresh();
     }
 
     taskENTER_CRITICAL(&s_session_mux);
@@ -262,11 +248,8 @@ static void screen_off(void)
         vTaskDelay(pdMS_TO_TICKS(80));
     }
     if (s_display_ok) {
-        mosu_board_display_off();
+        mosu_power_screen_off();
         mosu_board_enable_touch_wake(s_cfg.display.wake_on_touch);
-    }
-    if (s_display_lock) {
-        esp_pm_lock_release(s_display_lock);
     }
 
     taskENTER_CRITICAL(&s_session_mux);
@@ -558,26 +541,13 @@ void app_main(void)
     };
     mosu_session_init(&s_session, &session_cfg);
 
-    esp_pm_config_t pm_cfg = {
-        .max_freq_mhz = 160,
-        .min_freq_mhz = 80,
-        .light_sleep_enable = true,
-    };
-    err = esp_pm_configure(&pm_cfg);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "power management: %s", esp_err_to_name(err));
-    }
-    if (esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "mosu_display",
-                           &s_display_lock) != ESP_OK) {
-        s_display_lock = NULL;
-    }
-
     ESP_LOGI(TAG, "starting display");
     err = mosu_board_display_start();
     if (err == ESP_OK) {
         s_display_ok = true;
-        /* Apply the configured brightness before anything is drawn. */
-        mosu_board_brightness_set(s_cfg.display.brightness);
+        /* The power manager applies the configured brightness and the
+         * CPU/light-sleep policy before anything is drawn. */
+        mosu_power_init(&s_cfg);
         err = mosu_ui_create(&s_cfg);
         if (err == ESP_OK) {
             s_have_ui = true;

@@ -7,6 +7,7 @@ idf_component_register(
         mosu_config
         mosu_core
         mosu_net
+        mosu_tasks
         mosu_time
         mosu_ui
         app_update
