@@ -150,6 +150,7 @@ and `reboot` are the long-standing ones.
 | `power wifi` | Run one Wi-Fi sync now, then switch the radio off again. |
 | `pm` | Print the power-management state: CPU limits, light sleep, and which PM locks are held. |
 | `pmu` | Print battery voltage, percent, charging and VBUS, straight from the AXP2101. |
+| `stats` | Uptime, screen-on seconds, wakes and the estimated average current since `stats reset`. |
 | `rtc` | Print the PCF85063 time and whether it is considered valid. |
 | `imu` | Print `WHO_AM_I` and one accelerometer sample with its magnitude (1 g at rest). |
 | `i2c` | Scan the I2C bus and list the addresses that answer. |
@@ -178,6 +179,33 @@ Two practical warnings:
    (`CONFIG_USJ_NO_AUTO_LS_ON_CONNECTION`). `pm` shows the
    `usb_serial_jtag` lock active. Unplug USB, or use the UART0 pads, for a
    real light-sleep current. The option has no effect when the cable is out.
+
+## Measuring from the watch itself
+
+A meter is better, but the watch can measure its own duty cycle. The console's
+`stats` command reports uptime, screen-on time, wake count, battery voltage and
+an estimated average current since the last baseline:
+
+```text
+stats reset     # start a new window at the current percentage
+# unplug USB, leave the watch alone, do not open the console
+stats           # on reconnect: uptime, lit %, wakes, % used, mA estimate
+```
+
+Rules that make the number meaningful:
+
+* the measurement must be on the cell: the USB console resets the CPU when it
+  opens and holds `NO_LIGHT_SLEEP` while connected;
+* the counters live in RTC no-init memory, so the reset from opening the
+  console does not lose the window; the RTC clock supplies the elapsed time;
+* the percentage is the AXP2101 voltage gauge, and one percent is 4 mAh on
+  this cell. A one-hour window is very coarse; use six hours or a full day;
+* `stats` also prints a `drain:` line once the window is longer than ten
+  minutes and the watch is not charging.
+
+The learned screen policy is visible in the same line (`auto: screen 12 s,
+raise angle 56 deg`): a busy hour tightens the wrist threshold and shortens the
+lit window by bounded steps, and three calm hours give a step back.
 
 ## Measurement with a Nordic PPK2
 

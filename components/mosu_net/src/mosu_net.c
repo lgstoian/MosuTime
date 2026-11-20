@@ -52,10 +52,9 @@ static uint32_t s_next_presence_s;
 static uint8_t s_last_reason;
 static bool s_last_connected;
 
-/* How often to look for the configured network while a sync is failing.
- * A scan is much cheaper than a full join attempt: the radio is on for
- * about a second, then the normal sync schedule still applies. */
-#define PRESENCE_SCAN_S (15 * 60)
+/* Presence scans are driven by the learned per-hour score in mosu_policy:
+ * 15 minutes when the watch is normally home at this hour, up to 4 hours
+ * when it never is. */
 
 /* The console may replace the network list while the net task is reading it.
  * The strings are small, so a short spinlock around the copy is enough. */
@@ -452,12 +451,19 @@ static void net_task(void *arg)
     (void)arg;
     s_next_sync_s = 0;
     uint8_t fail_count = 0;
+    mosu_wifi_learn_t learn;
+    mosu_wifi_learn_init(&learn);
 
     for (;;) {
         uint32_t now = uptime_s();
+        struct tm local;
+        mosu_time_now(&local);
+        uint8_t hour = (uint8_t)(local.tm_hour % 24);
+
         if (s_sync_requested || (int32_t)(now - s_next_sync_s) >= 0) {
             s_sync_requested = false;
             bool ok = run_sync();
+            mosu_wifi_learn_note(&learn, hour, ok);
             if (ok) {
                 fail_count = 0;
             } else if (fail_count < UINT8_MAX) {
@@ -472,16 +478,22 @@ static void net_task(void *arg)
                 s_next_presence_s = 0;
             } else {
                 /* If no access point answered at all, look for a configured
-                 * SSID every 15 minutes.  When the owner comes home and the
-                 * radio can see it again, sync immediately instead of
-                 * waiting for the full backoff.  An auth failure means the
-                 * AP is visible: keep the normal, slower backoff so a wrong
-                 * password cannot spin the radio. */
+                 * SSID again.  The interval follows what this local hour
+                 * usually looks like: 15 minutes when the watch is normally
+                 * home at this hour, up to 4 hours when it never is.  When
+                 * the owner comes home and the radio sees the AP, sync
+                 * immediately instead of waiting for the full backoff.  An
+                 * auth failure means the AP is visible: keep the normal,
+                 * slower backoff so a wrong password cannot spin the radio. */
                 bool no_ap = s_last_reason == 0 ||
                              s_last_reason == WIFI_REASON_NO_AP_FOUND;
                 if (!s_last_connected && no_ap && s_cfg->wifi_count > 0 &&
                     !s_cfg->clock.wifi_always_on) {
-                    s_next_presence_s = uptime_s() + PRESENCE_SCAN_S;
+                    uint32_t scan = mosu_wifi_learn_scan_s(&learn, hour);
+                    s_next_presence_s = uptime_s() + scan;
+                    ESP_LOGI(TAG, "presence scan in %u min (hour %u score %u)",
+                             (unsigned)(scan / 60u), (unsigned)hour,
+                             (unsigned)mosu_wifi_learn_score(&learn, hour));
                 } else {
                     s_next_presence_s = 0;
                 }
@@ -493,13 +505,20 @@ static void net_task(void *arg)
         if (s_next_presence_s != 0 &&
             (int32_t)(uptime_s() - s_next_presence_s) >= 0) {
             s_next_presence_s = 0;
-            if (home_ap_visible()) {
+            bool visible = home_ap_visible();
+            mosu_wifi_learn_note(&learn, hour, visible);
+            if (visible) {
                 ESP_LOGI(TAG, "configured network is visible again, syncing");
                 s_sync_requested = true;
                 s_next_sync_s = uptime_s();
                 continue;
             }
-            s_next_presence_s = uptime_s() + PRESENCE_SCAN_S;
+            uint32_t scan = mosu_wifi_learn_scan_s(&learn, hour);
+            s_next_presence_s = uptime_s() + scan;
+            ESP_LOGI(TAG, "still away at hour %u (score %u), next scan in %u "
+                     "min", (unsigned)hour,
+                     (unsigned)mosu_wifi_learn_score(&learn, hour),
+                     (unsigned)(scan / 60u));
         }
 
         uint32_t wait_s = 60;

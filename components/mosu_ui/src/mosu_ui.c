@@ -542,6 +542,19 @@ void mosu_ui_refresh(void)
     }
 }
 
+void mosu_ui_render_now(void)
+{
+    lv_display_t *display = lv_display_get_default();
+    if (!s_screen || !display) {
+        return;
+    }
+    if (lvgl_port_lock(1000)) {
+        invalidate();
+        lv_refr_now(display);
+        lvgl_port_unlock();
+    }
+}
+
 void mosu_ui_flash_tap(void)
 {
     if (!s_cfg || !s_screen) {

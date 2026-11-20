@@ -214,24 +214,34 @@ successful one, and red (with a slash) when the last attempt failed.
 
 While the screen is off:
 
-* the panel is switched off with its own command and the brightness is zeroed;
+* the panel is put into **sleep-in** (`0x10`), not just display-off, so its
+  bias draws microamps; waking does sleep-out, draws the first frame while the
+  panel is still dark, then switches the display on;
 * LVGL's tick timer is stopped, so nothing renders and the touch panel is not
   polled;
 * the CPU enters automatic light sleep between accelerometer samples;
 * the IMU is sampled at `motion_poll_hz` (default 8 Hz) and the touch
   controller's interrupt line is a GPIO wake source;
-* the radio is off unless a sync is due.
+* the radio is off unless a sync is due. The presence scan follows a learned
+  per-hour score: 15 minutes when the watch is normally home at that hour, up
+  to 4 hours when it never is.
+* the screen-on window and the wrist threshold adapt to the wearer's actual
+  wake rate, within bounded steps (at most +14 deg, at least an 8 s window).
+
+`stats` on the console reports uptime, screen-on seconds, wakes and the
+estimated average current since the last `stats reset`. The counters live in
+RTC no-init memory, so opening the USB console (which resets the CPU) does not
+lose a measurement that started on battery.
 
 When the screen is on, a `NO_LIGHT_SLEEP` power lock is held so the QSPI
 transfers are never interrupted. The CPU is capped at 160 MHz for the same
 reason - this is a clock, not a game console.
 
-Expect days of runtime from the shipped cell - roughly 3-4 days at 300 mAh in
-the modelled duty cycle, longer with a bigger cell or fewer wakes. The exact
-figure depends on the cell, the touch controller, the wrist-raise rate and the
-sync interval. `tools/power_budget.py` shows the trade-offs, and
-[`docs/power.md`](docs/power.md) has the PPK2/USB-meter procedure and the
-measurement table to fill before promising anything to the wearer.
+Expect days of runtime from the shipped cell. The exact figure depends on the
+cell, the touch controller, the wrist-raise rate and the sync interval; the
+learned policy is what keeps a fidgety day from costing the whole cell.
+[`docs/power.md`](docs/power.md) has the measurement procedure and the table
+to fill before promising anything to the wearer.
 
 ## Emulator
 

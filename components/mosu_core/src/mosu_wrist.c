@@ -13,8 +13,8 @@
 
 #include "mosu_core/mosu_core.h"
 
-#define MOSU_WRIST_HOLD_MS 150
-#define MOSU_WRIST_HOLD_DEG 25.0f
+#define MOSU_WRIST_HOLD_MS 300
+#define MOSU_WRIST_HOLD_DEG 20.0f
 #define MOSU_WRIST_STILL_DEG 12.0f
 #define MOSU_WRIST_BASELINE_ALPHA 0.05f
 #define MOSU_RAD_TO_DEG 57.2957795f

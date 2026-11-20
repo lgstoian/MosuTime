@@ -56,10 +56,14 @@ try {
     if (-not $systemPython) { throw "no system python found for PyInstaller" }
     $cfgData = (Join-Path $root "sd_card\mosu.cfg") + ";sd_card"
     $voiceData = (Join-Path $root "sd_card\voice") + ";sd_card/voice"
+    $iconData = (Join-Path $root "tools\mosu.ico") + ";tools"
+    $icon = Join-Path $root "tools\mosu.ico"
     & $systemPython -m PyInstaller --noconfirm --clean --onefile --windowed `
         --name MosuTimeManager `
+        --icon $icon `
         --add-data $cfgData `
         --add-data $voiceData `
+        --add-data $iconData `
         --collect-all esptool `
         --hidden-import serial `
         --hidden-import serial.tools.list_ports `

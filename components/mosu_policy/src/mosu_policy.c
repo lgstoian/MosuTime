@@ -357,3 +357,160 @@ uint32_t mosu_policy_next_sync_s(uint8_t fail_count, uint32_t sync_interval_s)
 
     return sync_interval_s < 3600u ? 3600u : sync_interval_s;
 }
+
+/* --------------------------------------------------------- learned policy */
+
+void mosu_wifi_learn_init(mosu_wifi_learn_t *learn)
+{
+    if (!learn) {
+        return;
+    }
+    for (int i = 0; i < MOSU_WIFI_HOURS; i++) {
+        learn->score[i] = 128;
+    }
+}
+
+void mosu_wifi_learn_note(mosu_wifi_learn_t *learn, uint8_t hour, bool ok)
+{
+    if (!learn || hour >= MOSU_WIFI_HOURS) {
+        return;
+    }
+    uint8_t score = learn->score[hour];
+    if (ok) {
+        score = (uint8_t)(score + (255 - score) / 4 + 1);
+    } else {
+        score = (uint8_t)(score - score / 8 - 1);
+    }
+    learn->score[hour] = score;
+}
+
+uint8_t mosu_wifi_learn_score(const mosu_wifi_learn_t *learn, uint8_t hour)
+{
+    if (!learn || hour >= MOSU_WIFI_HOURS) {
+        return 128;
+    }
+    return learn->score[hour];
+}
+
+uint32_t mosu_wifi_learn_scan_s(const mosu_wifi_learn_t *learn, uint8_t hour)
+{
+    uint8_t score = mosu_wifi_learn_score(learn, hour);
+    if (score >= 160) {
+        return 15u * 60u;
+    }
+    if (score >= 96) {
+        return 30u * 60u;
+    }
+    if (score >= 48) {
+        return 60u * 60u;
+    }
+    if (score >= 24) {
+        return 120u * 60u;
+    }
+    return 240u * 60u;
+}
+
+void mosu_power_learn_init(mosu_power_learn_t *learn)
+{
+    if (!learn) {
+        return;
+    }
+    memset(learn, 0, sizeof(*learn));
+}
+
+void mosu_power_learn_note(mosu_power_learn_t *learn, uint32_t dt_ms,
+                           bool screen_on)
+{
+    if (!learn) {
+        return;
+    }
+    learn->window_ms += dt_ms;
+    if (screen_on) {
+        learn->screen_ms += dt_ms;
+        if (!learn->was_on) {
+            learn->wakes++;
+        }
+    }
+    learn->was_on = screen_on;
+}
+
+bool mosu_power_learn_tick(mosu_power_learn_t *learn, uint32_t window_ms)
+{
+    if (!learn || learn->window_ms == 0) {
+        return false;
+    }
+
+    const uint32_t elapsed = learn->window_ms;
+    const uint32_t duty_per_mille = (uint32_t)((uint64_t)learn->screen_ms *
+                                               1000u / elapsed);
+    bool changed = false;
+
+    learn->since_change_ms += elapsed;
+
+    if ((duty_per_mille >= 120u || learn->wakes >= 10u) &&
+        learn->since_change_ms >= 3u * 3600u * 1000u) {
+        uint8_t bonus = (uint8_t)(learn->angle_bonus + 2u);
+        if (bonus > MOSU_POWER_ANGLE_MAX) {
+            bonus = MOSU_POWER_ANGLE_MAX;
+        }
+        uint16_t cut = (uint16_t)(learn->screen_cut_ms + 1000u);
+        if (cut > MOSU_POWER_CUT_MAX_MS) {
+            cut = MOSU_POWER_CUT_MAX_MS;
+        }
+        changed = bonus != learn->angle_bonus || cut != learn->screen_cut_ms;
+        learn->angle_bonus = bonus;
+        learn->screen_cut_ms = cut;
+        learn->calm_hours = 0;
+        learn->since_change_ms = 0;
+    } else if (duty_per_mille <= 30u && learn->wakes <= 3u) {
+        if (learn->calm_hours < UINT8_MAX) {
+            learn->calm_hours++;
+        }
+        if (learn->calm_hours >= 3u &&
+            learn->since_change_ms >= 6u * 3600u * 1000u) {
+            if (learn->angle_bonus > 0) {
+                learn->angle_bonus--;
+            }
+            if (learn->screen_cut_ms >= 500u) {
+                learn->screen_cut_ms = (uint16_t)(learn->screen_cut_ms - 500u);
+            } else {
+                learn->screen_cut_ms = 0;
+            }
+            learn->calm_hours = 0;
+            learn->since_change_ms = 0;
+            changed = true;
+        }
+    } else {
+        learn->calm_hours = 0;
+    }
+
+    learn->window_ms = 0;
+    learn->screen_ms = 0;
+    learn->wakes = 0;
+    (void)window_ms;
+    return changed;
+}
+
+uint16_t mosu_power_learn_angle(const mosu_power_learn_t *learn,
+                                uint16_t base_deg)
+{
+    uint32_t angle = base_deg;
+    if (learn) {
+        angle += learn->angle_bonus;
+    }
+    return angle > 80u ? 80u : (uint16_t)angle;
+}
+
+uint32_t mosu_power_learn_screen_ms(const mosu_power_learn_t *learn,
+                                    uint32_t base_ms)
+{
+    if (!learn) {
+        return base_ms;
+    }
+    if (base_ms <= learn->screen_cut_ms) {
+        return MOSU_POWER_SCREEN_MIN_MS;
+    }
+    uint32_t result = base_ms - learn->screen_cut_ms;
+    return result < MOSU_POWER_SCREEN_MIN_MS ? MOSU_POWER_SCREEN_MIN_MS
+                                             : result;
+}

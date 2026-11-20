@@ -43,6 +43,9 @@ changed to make the emulator work.
 | 24 | PC-formatted FAT32 card rejected with `FR_NO_FILESYSTEM` | yes: format on the watch | done: `sd format: ESP_OK, mounted` |
 | 25 | Console CR-to-LF input corrupted binary uploads | yes | done: 79 files pushed with a CRC-32 each |
 | 26 | Binary upload capped at 6 KiB/s and lost the odd byte | yes | done: `rx bench` 455 KiB/s, 79 files in ~20 s |
+| 27 | Display-off left the AMOLED driver biased all night | yes | pending: 6 h+ drain comparison |
+| 28 | A 35 deg / 150 ms wrist raise woke the face far too often | yes | done: 50 deg / 300 ms / 5 s and learned steps |
+| 29 | USB console open reset the CPU and wiped the counters | yes: RTC no-init | done: `stats` survives reconnects |
 
 ## 1. SD mount blocking boot
 
@@ -727,6 +730,73 @@ slower (10 KiB/s) because that path still reads one character per call.
 the full 79-file push completes in about 20 s at ~230-300 KiB/s. One push
 retried a single file after a lost 4 KB chunk; the tool restarts that file and
 the CRC-32 still guarantees what lands on the card.
+
+## 27. Display-off left the AMOLED driver biased all night
+
+**Symptom.** The 400 mAh cell lasted only a few hours even though the face was
+off most of the time.
+
+**Cause.** `mosu_board_display_off()` sent display-off (`0x28`) and brightness
+zero, but never sleep-in (`0x10`). Display-off stops the scan while the panel's
+driver, bias and DC-DC stay powered, which is a constant load of roughly
+10-25 mA - most of a 400 mAh cell in a day.
+
+**Fix.** Display-off is followed by a 5 ms wait and sleep-in; waking sends
+sleep-out (`0x11`), waits 120 ms, draws the first frame while the display is
+still off, then sends display-on and restores brightness. The reorder matters:
+sleep-in loses the GRAM, so switching the display on first would flash
+undefined pixels.
+
+**Fix lives in.**
+[`components/mosu_board/src/mosu_board_display.c`](../components/mosu_board/src/mosu_board_display.c)
+(`mosu_board_display_prepare_wake`, `mosu_board_display_off`),
+[`main/app_main.c`](../main/app_main.c) (`screen_on`).
+
+**Verification.** Off/on and a screenshot after wake work with no E lines; the
+measured drain comparison is pending.
+
+## 28. A 35 deg / 150 ms wrist raise woke the face far too often
+
+**Symptom.** The face lit on small hand movements and the battery paid for it;
+the wearer found the raise too sensitive.
+
+**Cause.** The detector fired on any 35 degree change from the baseline that
+held for 150 ms. Picking something up or turning the wrist qualifies, and each
+false wake costs a full `screen_on_ms` window.
+
+**Fix.** Default threshold 50 degrees, hold 300 ms, refractory 5 s. On top of
+that, the watch measures its own screen-on duty per hour and, when it is above
+12% or there are more than 10 wakes, raises the threshold by 2 degrees and
+shortens the lit window by 1 s (bounded +14 s and -7 s, never below 8 s).
+Three calm hours give a step back. The configured values remain the baseline.
+
+**Fix lives in.**
+[`components/mosu_core/src/mosu_wrist.c`](../components/mosu_core/src/mosu_wrist.c),
+[`components/mosu_policy/src/mosu_policy.c`](../components/mosu_policy/src/mosu_policy.c)
+(`mosu_power_learn_*`), [`main/app_main.c`](../main/app_main.c)
+(`apply_power_learning`), `sd_card/mosu.cfg`.
+
+**Verification.** Host tests cover the bounds; the wrist test now requires the
+longer hold. A 6 h+ drain comparison is pending.
+
+## 29. USB console open reset the CPU and wiped the counters
+
+**Symptom.** `stats` always reported `up 0h00m` and a fresh wake count, even
+after a window that started hours earlier.
+
+**Cause.** Opening the USB Serial/JTAG console resets the chip
+(`rst:0x15 USB_UART_CHIP_RESET`). `RTC_DATA_ATTR` variables are re-initialised
+by the C runtime on a normal reset; only `RTC_NOINIT_ATTR` survives it.
+
+**Fix.** The power counters and baseline live in `.rtc.noinit`, guarded by a
+magic value so a cold boot starts clean. The elapsed time comes from the
+external RTC, so a reset does not distort the window.
+
+**Fix lives in.** [`main/app_main.c`](../main/app_main.c) (`stats_init`,
+`diag_stats`).
+
+**Verification.** After `stats reset`, waiting two minutes and reconnecting
+shows `up 0h02m` with the same baseline percentage.
 
 ## Adding a finding
 

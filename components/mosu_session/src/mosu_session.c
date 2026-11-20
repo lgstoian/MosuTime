@@ -158,6 +158,17 @@ void mosu_session_screen_off(mosu_session_t *session, uint32_t now_ms)
      * began in the dark may finish after the panel comes back. */
 }
 
+void mosu_session_set_screen_on_ms(mosu_session_t *session, uint32_t ms)
+{
+    if (!session) {
+        return;
+    }
+    session->cfg.screen_on_ms =
+        clamp_u32(ms, MOSU_SESSION_SCREEN_ON_MIN_MS,
+                  MOSU_SESSION_SCREEN_ON_MAX_MS,
+                  MOSU_SESSION_SCREEN_ON_DEFAULT_MS);
+}
+
 bool mosu_session_is_on(const mosu_session_t *session)
 {
     return session && session->screen_on;

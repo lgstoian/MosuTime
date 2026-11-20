@@ -450,7 +450,7 @@ void mosu_board_pmu_dump(void)
      * current, termination current and CV target.  Printing them makes the
      * battery bring-up check possible without a vendor tool. */
     static const uint8_t charge_regs[] = {
-        0x27, 0x49, 0x50, 0x61, 0x62, 0x63, 0x64,
+        0x27, 0x49, 0x50, 0x61, 0x62, 0x63, 0x64, 0x80, 0x90, 0x91,
     };
     for (size_t i = 0; i < sizeof(charge_regs) / sizeof(charge_regs[0]); i++) {
         uint8_t value = 0;

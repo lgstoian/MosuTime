@@ -40,6 +40,7 @@ static esp_lcd_panel_io_handle_t s_io;
 static esp_lcd_touch_handle_t s_touch;
 static lv_display_t *s_display;
 static bool s_display_on;
+static bool s_panel_awake;
 static uint8_t s_brightness;
 
 /* Vendor initialisation sequence for this panel revision. */
@@ -217,6 +218,7 @@ esp_err_t mosu_board_display_start(void)
     ESP_RETURN_ON_ERROR(mosu_board_enable_touch_wake(false), TAG, "wake");
 
     s_display_on = true;
+    s_panel_awake = true;
     ESP_LOGI(TAG, "display ready (%dx%d)", MOSU_LCD_H_RES, MOSU_LCD_V_RES);
     return ESP_OK;
 }
@@ -241,6 +243,35 @@ esp_err_t mosu_board_brightness_set(uint8_t percent)
     return esp_lcd_panel_io_tx_param(s_io, (int)cmd, &value, 1);
 }
 
+/* SLPOUT / SLPIN are not exposed by the panel driver: send them through the
+ * same QSPI command encoding the brightness path uses. */
+static esp_err_t panel_sleep(bool sleep)
+{
+    if (!s_io) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    const uint8_t cmd = sleep ? 0x10 : 0x11;
+    uint32_t word = ((uint32_t)cmd << 8) |
+                    ((uint32_t)LCD_OPCODE_WRITE_CMD << 24);
+    return esp_lcd_panel_io_tx_param(s_io, (int)word, NULL, 0);
+}
+
+esp_err_t mosu_board_display_prepare_wake(void)
+{
+    if (!s_panel) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (s_panel_awake) {
+        return ESP_OK;
+    }
+    ESP_RETURN_ON_ERROR(panel_sleep(false), TAG, "slpout");
+    /* The panel datasheet asks for 120 ms before the first frame after
+     * sleep-out. */
+    vTaskDelay(pdMS_TO_TICKS(120));
+    s_panel_awake = true;
+    return ESP_OK;
+}
+
 esp_err_t mosu_board_display_on(void)
 {
     if (!s_panel) {
@@ -249,6 +280,7 @@ esp_err_t mosu_board_display_on(void)
     if (s_display_on) {
         return ESP_OK;
     }
+    ESP_RETURN_ON_ERROR(mosu_board_display_prepare_wake(), TAG, "wake");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(s_panel, true), TAG, "on");
     s_display_on = true;
     return ESP_OK;
@@ -266,6 +298,13 @@ esp_err_t mosu_board_display_off(void)
     mosu_board_brightness_set(0);
     ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(s_panel, false), TAG, "off");
     s_display_on = false;
+    /* Display-off alone leaves the panel's bias and driver running.  Sleep-in
+     * is what takes the glass to microamps; keep the GRAM assumption out of
+     * the picture by redrawing before the next display-on. */
+    vTaskDelay(pdMS_TO_TICKS(5));
+    if (panel_sleep(true) == ESP_OK) {
+        s_panel_awake = false;
+    }
     return ESP_OK;
 }
 

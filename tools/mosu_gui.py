@@ -40,7 +40,7 @@ except ImportError:
 
 FROZEN = bool(getattr(sys, "frozen", False))
 APP_NAME = "MosuTime Manager"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 
 
 def find_repo(start):
@@ -66,8 +66,15 @@ if FROZEN:
     SD_VOICE = os.path.join(RES_DIR, "sd_card", "voice")
 else:
     ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    RES_DIR = ROOT
     SD_CFG = os.path.join(ROOT, "sd_card", "mosu.cfg")
     SD_VOICE = os.path.join(ROOT, "sd_card", "voice")
+
+ICON = os.path.join(RES_DIR, "tools", "mosu.ico")
+STATE_DIR = DATA_DIR if FROZEN else os.path.join(
+    os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "MosuTime")
+os.makedirs(STATE_DIR, exist_ok=True)
+PORT_FILE = os.path.join(STATE_DIR, "port.txt")
 
 BUILD_SCRIPT = os.path.join(ROOT, "tools", "build.ps1") if ROOT else None
 BUILD_DIR = os.path.join(ROOT, "build") if ROOT else None
@@ -202,6 +209,22 @@ def pick_port(port):
     return None
 
 
+def enable_dpi_awareness():
+    """Tk is DPI-unaware by default, which makes the whole window blurry on a
+    scaled Windows 11 display."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        try:
+            import ctypes
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
+
 class Field:
     """One mosu.cfg key, its type, its range and a short help line."""
 
@@ -235,9 +258,9 @@ SCHEMA = [
           hint="Touch the glass to light the face"),
     Field("display", "wake_on_motion", "Wrist raise wake", "bool", True,
           hint="Raise the arm to light the face"),
-    Field("display", "motion_angle_deg", "Raise angle", "int", 35, 10, 80,
+    Field("display", "motion_angle_deg", "Raise angle", "int", 50, 10, 80,
           hint="Minimum wrist angle in degrees"),
-    Field("display", "motion_refractory_ms", "Raise gap", "int", 2500, 300,
+    Field("display", "motion_refractory_ms", "Raise gap", "int", 5000, 300,
           20000, 100, hint="Ignore raises this long after one"),
     Field("display", "motion_poll_hz", "IMU poll rate", "int", 8, 1, 20,
           hint="Samples per second while the screen is off (4..8 keeps power low)"),
@@ -501,19 +524,42 @@ class App:
     def __init__(self, root):
         self.root = root
         self.lines = queue.Queue()
+        self.callbacks = queue.Queue()
         self.actions = queue.Queue()
         self.device = Device(self.push_log)
         self.worker = None
         self.info = {}
 
         root.title("%s %s" % (APP_NAME, APP_VERSION))
-        root.geometry("980x720")
-        root.minsize(820, 600)
+        root.geometry("1040x760")
+        root.minsize(860, 640)
         root.configure(bg=BG)
+        if os.path.isfile(ICON):
+            try:
+                root.iconbitmap(default=ICON)
+            except tk.TclError:
+                pass
+        root.option_add("*TCombobox*Listbox.background", PANEL)
+        root.option_add("*TCombobox*Listbox.foreground", FG)
+        root.option_add("*TCombobox*Listbox.selectBackground", ACCENT)
+        root.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
         self.style()
         self.build_ui()
         self.refresh_ports()
+        self.root.after(50, self.use_dark_title_bar)
         self.root.after(80, self.tick)
+
+    def use_dark_title_bar(self):
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
+            value = ctypes.c_int(1)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, 20, ctypes.byref(value), ctypes.sizeof(value))
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------ ui
 
@@ -521,7 +567,9 @@ class App:
         s = ttk.Style()
         s.theme_use("clam")
         s.configure(".", background=BG, foreground=FG, fieldbackground=PANEL,
-                    bordercolor="#2a2e36", lightcolor=PANEL, darkcolor=PANEL)
+                    bordercolor="#2a2e36", lightcolor=PANEL, darkcolor=PANEL,
+                    troughcolor="#0f1114", focuscolor=ACCENT,
+                    selectbackground=PANEL, selectforeground=FG)
         s.configure("TFrame", background=BG)
         s.configure("Panel.TFrame", background=PANEL)
         s.configure("TLabel", background=BG, foreground=FG)
@@ -534,27 +582,57 @@ class App:
                     font=("Consolas", 11))
         s.configure("Big.TLabel", background=PANEL, foreground=FG,
                     font=("Segoe UI Semibold", 30))
-        s.configure("TButton", background="#2a2f38", foreground=FG,
-                    padding=(12, 6), borderwidth=0)
+        s.configure("TButton", background="#262b33", foreground=FG,
+                    padding=(12, 6), borderwidth=0, focusthickness=0)
         s.map("TButton",
-              background=[("active", "#353b46"), ("disabled", "#20242a")],
+              background=[("pressed", "#1d2128"),
+                          ("active", "#343a45"),
+                          ("disabled", "#20242a")],
               foreground=[("disabled", "#6b7078")])
         s.configure("Accent.TButton", background=ACCENT, foreground="#ffffff")
-        s.map("Accent.TButton", background=[("active", "#6aa1ff")])
+        s.map("Accent.TButton",
+              background=[("pressed", "#3b74d6"), ("active", "#6aa1ff")],
+              foreground=[("disabled", "#cfd6e4")])
         s.configure("Danger.TButton", background="#7a2b28", foreground=FG)
-        s.map("Danger.TButton", background=[("active", "#9b3733")])
-        s.configure("TNotebook", background=BG, borderwidth=0)
+        s.map("Danger.TButton",
+              background=[("pressed", "#662421"), ("active", "#9b3733")])
+        s.configure("TNotebook", background=BG, borderwidth=0,
+                    tabmargins=(2, 6, 2, 0))
         s.configure("TNotebook.Tab", background="#1a1d22", foreground=MUTED,
-                    padding=(18, 8))
-        s.map("TNotebook.Tab", background=[("selected", PANEL)],
-              foreground=[("selected", FG)])
+                    padding=(18, 8), borderwidth=0, lightcolor=PANEL,
+                    darkcolor=PANEL, bordercolor=PANEL, focuscolor=BG)
+        s.map("TNotebook.Tab",
+              background=[("selected", PANEL), ("active", "#22262d")],
+              foreground=[("selected", FG), ("active", FG)])
         s.configure("TEntry", fieldbackground=PANEL, foreground=FG,
-                    insertcolor=FG, bordercolor="#2a2e36")
-        s.configure("TCombobox", fieldbackground=PANEL, foreground=FG,
-                    background=PANEL, arrowcolor=FG)
+                    insertcolor=FG, bordercolor="#2a2e36", padding=4)
+        s.configure("TSpinbox", fieldbackground=PANEL, foreground=FG,
+                    background=PANEL, arrowcolor=FG, bordercolor="#2a2e36",
+                    padding=3)
+        s.configure("TCombobox", fieldbackground=PANEL, background=PANEL,
+                    foreground=FG, arrowcolor=FG, bordercolor="#2a2e36",
+                    padding=4, selectbackground=PANEL, selectforeground=FG)
+        s.map("TCombobox",
+              fieldbackground=[("readonly", PANEL), ("disabled", "#20242a")],
+              foreground=[("readonly", FG), ("disabled", "#6b7078")],
+              selectbackground=[("readonly", PANEL)],
+              selectforeground=[("readonly", FG)],
+              background=[("readonly", PANEL), ("active", "#2a2f38")],
+              arrowcolor=[("active", FG)])
+        s.configure("TScrollbar", background="#2a2f38", troughcolor=BG,
+                    bordercolor=BG, arrowcolor=MUTED)
+        s.map("TScrollbar", background=[("active", "#3a4150")])
         s.configure("Horizontal.TProgressbar", background=ACCENT,
-                    troughcolor=PANEL, borderwidth=0)
-        s.configure("TSeparator", background="#2a2e36")
+                    troughcolor="#0f1114", bordercolor="#0f1114",
+                    lightcolor=ACCENT, darkcolor=ACCENT)
+        s.configure("Vertical.TProgressbar", background=ACCENT,
+                    troughcolor="#0f1114", bordercolor="#0f1114",
+                    lightcolor=ACCENT, darkcolor=ACCENT)
+        s.configure("TCheckbutton", background=BG, foreground=FG,
+                    indicatorcolor=PANEL)
+        s.map("TCheckbutton",
+              background=[("active", BG)],
+              indicatorcolor=[("selected", ACCENT), ("active", "#2a2f38")])
 
     def build_ui(self):
         top = ttk.Frame(self.root, padding=(14, 12, 14, 6))
@@ -615,8 +693,11 @@ class App:
     def build_dashboard(self):
         grid = ttk.Frame(self.tab_dash)
         grid.pack(fill="both", expand=True)
-        grid.columnconfigure(0, weight=1)
-        grid.columnconfigure(1, weight=1)
+        grid.columnconfigure(0, weight=1, uniform="card")
+        grid.columnconfigure(1, weight=1, uniform="card")
+        grid.rowconfigure(0, weight=0)
+        grid.rowconfigure(1, weight=0)
+        grid.rowconfigure(2, weight=1)
 
         dev = self.card(grid, "Firmware and board")
         dev.grid(row=0, column=0, sticky="nsew", padx=(0, 8), pady=(0, 8))
@@ -638,6 +719,10 @@ class App:
         self.d_charge = self.add_row(power, "Charging", "-")
         self.d_sd = self.add_row(power, "SD card", "-")
         self.d_audio = self.add_row(power, "Audio", "-")
+        self.d_uptime = self.add_row(power, "Uptime", "-")
+        self.d_screen = self.add_row(power, "Screen time", "-")
+        self.d_wakes = self.add_row(power, "Wakes", "-")
+        self.d_auto = self.add_row(power, "Auto policy", "-")
 
         actions = self.card(grid, "Actions")
         actions.grid(row=1, column=1, sticky="nsew", padx=(8, 0), pady=(8, 0))
@@ -758,6 +843,7 @@ class App:
                 anchor="w", pady=(0, 8))
 
         pages = ttk.Notebook(self.tab_settings)
+        self.s_settings_tabs = pages
         pages.pack(fill="both", expand=True)
         titles = [
             ("device", "Device"), ("display", "Display"), ("colors", "Colours"),
@@ -776,24 +862,28 @@ class App:
     def add_field(self, parent, field):
         row = ttk.Frame(parent)
         row.pack(fill="x", pady=(7, 10))
-        row.columnconfigure(0, weight=1)
+        row.columnconfigure(0, weight=1, minsize=460)
+        row.columnconfigure(1, weight=0, minsize=220)
 
         text = ttk.Frame(row)
-        text.grid(row=0, column=0, sticky="w")
+        text.grid(row=0, column=0, sticky="nw")
         tk.Label(text, text=field.label, bg=BG, fg=FG,
                  font=("Segoe UI", 10)).pack(anchor="w")
         if field.hint:
             tk.Label(text, text=field.hint, bg=BG, fg=MUTED,
-                     font=("Segoe UI", 8), wraplength=620,
+                     font=("Segoe UI", 8), wraplength=470,
                      justify="left").pack(anchor="w")
 
         holder = ttk.Frame(row)
-        holder.grid(row=0, column=1, sticky="e")
+        holder.grid(row=0, column=1, sticky="ne")
         key = (field.section, field.key)
 
         if field.kind == "bool":
             var = tk.BooleanVar()
-            ttk.Checkbutton(holder, variable=var).pack(side="right")
+            tk.Checkbutton(holder, variable=var, bg=BG, activebackground=BG,
+                           selectcolor="#0f1114", fg=FG,
+                           highlightthickness=0, bd=0, padx=0, pady=0,
+                           takefocus=False).pack(side="right")
         elif field.kind == "int":
             var = tk.StringVar()
             ttk.Spinbox(holder, from_=field.lo, to=field.hi,
@@ -945,7 +1035,7 @@ class App:
             self.device.send("md /sdcard")
             self.device.drain(0.3)
             ok = self.push_file("/sdcard/mosu.cfg", data, "mosu.cfg")
-            self.root.after(0, self.settings_pushed, ok)
+            self.ui(self.settings_pushed, ok)
 
         self.run_worker(work, "Pushing mosu.cfg...")
 
@@ -1050,10 +1140,23 @@ class App:
     def push_log(self, line):
         self.lines.put(line)
 
+    def ui(self, fn, *args):
+        """Run a callback in the Tk thread; worker threads must never call Tk."""
+        self.callbacks.put((fn, args))
+
     def log(self, text):
         self.push_log(text)
 
     def tick(self):
+        while True:
+            try:
+                fn, args = self.callbacks.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                fn(*args)
+            except Exception:
+                pass
         while True:
             try:
                 line = self.lines.get_nowait()
@@ -1089,7 +1192,7 @@ class App:
                 self.log("!! %s" % exc)
             finally:
                 self.device.busy = False
-                self.root.after(0, self.worker_done)
+                self.ui(self.worker_done)
 
         self.worker = threading.Thread(target=wrap, daemon=True)
         self.worker.start()
@@ -1107,13 +1210,32 @@ class App:
         labels = [label for _dev, label, _vid, _pid in ports]
         self.ports = ports
         self.port_box["values"] = labels
-        if labels:
-            chosen = 0
-            for index, (_dev, label, vid, pid) in enumerate(ports):
+        if not labels:
+            return
+        saved = ""
+        try:
+            with open(PORT_FILE, "r", encoding="utf-8") as handle:
+                saved = handle.read().strip()
+        except OSError:
+            pass
+        chosen = None
+        for index, (dev, _label, _vid, _pid) in enumerate(ports):
+            if saved and dev == saved:
+                chosen = index
+                break
+        if chosen is None:
+            for index, (_dev, _label, vid, _pid) in enumerate(ports):
                 if vid == 0x303A:
                     chosen = index
                     break
-            self.port_box.current(chosen)
+        self.port_box.current(chosen if chosen is not None else 0)
+
+    def remember_port(self, port):
+        try:
+            with open(PORT_FILE, "w", encoding="utf-8") as handle:
+                handle.write(port)
+        except OSError:
+            pass
 
     def current_port(self):
         index = self.port_box.current()
@@ -1143,7 +1265,7 @@ class App:
                     break
             else:
                 raise RuntimeError("the watch did not answer on %s" % port)
-            self.root.after(0, self.connected, port)
+            self.ui(self.connected, port)
 
         self.device.busy = True
         threading.Thread(target=lambda: self._connect_wrap(work),
@@ -1154,7 +1276,7 @@ class App:
             work()
         except Exception as exc:  # noqa: BLE001
             self.device.close()
-            self.root.after(0, self.connect_failed, str(exc))
+            self.ui(self.connect_failed, str(exc))
         finally:
             self.device.busy = False
 
@@ -1162,6 +1284,7 @@ class App:
         self.connect_btn.configure(text="Disconnect")
         self.dot.itemconfigure(self.dot_id, fill=GREEN)
         self.set_status("Connected to %s" % port, GREEN)
+        self.remember_port(port)
         self.refresh_dashboard()
 
     def connect_failed(self, text):
@@ -1212,16 +1335,18 @@ class App:
         def work():
             self.device.drain(0.2)
             out = []
-            for cmd, settle in (("version", 0.9), ("status", 1.1)):
+            for cmd, settle in (("version", 0.8), ("status", 1.0),
+                                ("stats", 0.8)):
                 self.device.send(cmd)
                 out += self.device.capture(settle)
-            self.root.after(0, self.parse_dashboard, out)
+            self.ui(self.parse_dashboard, out)
 
         self.run_worker(work, "Reading the watch...")
 
     def parse_dashboard(self, lines):
         app = idf = mac = chip = ""
         clock = tz = net = sync = batt = charge = sd = audio = ""
+        uptime = screen = wakes = auto = ""
         for line in lines:
             s = line.strip()
             if s.startswith("app    :"):
@@ -1242,6 +1367,17 @@ class App:
                 batt = s.split(":", 1)[1].strip()
             elif s.startswith("audio  :"):
                 audio = s.split(":", 1)[1].strip()
+            elif s.startswith("stats :"):
+                body = s.split(":", 1)[1]
+                parts = [part.strip() for part in body.split(",")]
+                if parts and parts[0].startswith("up "):
+                    uptime = parts[0][3:]
+                if len(parts) > 1:
+                    screen = parts[1].replace("screen on ", "")
+                if len(parts) > 2:
+                    wakes = parts[2]
+            elif s.startswith("auto  :"):
+                auto = s.split(":", 1)[1].strip()
             elif s.startswith("display :"):
                 pass
             elif s.startswith("voice"):
@@ -1263,7 +1399,20 @@ class App:
                 if p.startswith("sync age"):
                     self.d_sync.set(p[9:])
         if net:
-            self.d_net.set(net)
+            state = None
+            match = re.search(r"state (\d+)", net)
+            if match:
+                state = int(match.group(1))
+            words = {0: "idle", 1: "connecting", 2: "connected",
+                     3: "failed"}
+            text = words.get(state, "state %s" % state)
+            ip = re.search(r"ip ([0-9.]+)", net)
+            rssi = re.search(r"rssi (-?\d+)", net)
+            if ip:
+                text += ", " + ip.group(1)
+            if rssi and state == 2:
+                text += ", %s dBm" % rssi.group(1)
+            self.d_net.set(text)
         if batt:
             self.d_batt.set(batt.split(",")[0])
             self.d_charge.set(",".join(batt.split(",")[1:]).strip())
@@ -1272,6 +1421,14 @@ class App:
             self.d_sd.set("mounted" if sd == "mounted" else "not mounted")
         if audio:
             self.d_audio.set(audio)
+        if uptime:
+            self.d_uptime.set(uptime)
+        if screen:
+            self.d_screen.set(screen)
+        if wakes:
+            self.d_wakes.set(wakes)
+        if auto:
+            self.d_auto.set(auto)
         if not (app or clock or batt):
             self.set_status("The watch sent no status; is the console free?",
                             AMBER)
@@ -1344,12 +1501,12 @@ class App:
             code = proc.wait()
             self.append_fw("\n== %s ==\n" % ("PASS" if code == 0 else
                                              "FAIL (exit %d)" % code))
-            self.root.after(0, self.build_done, code, was_open)
+            self.ui(self.build_done, code, was_open)
 
         threading.Thread(target=work, daemon=True).start()
 
     def append_fw(self, text):
-        self.root.after(0, self._append_fw, text)
+        self.ui(self._append_fw, text)
 
     def open_build(self):
         if hasattr(os, "startfile"):
@@ -1426,7 +1583,7 @@ class App:
 
         def work():
             ok = self.run_esptool(port, image)
-            self.root.after(0, self.flash_done, ok, was_open)
+            self.ui(self.flash_done, ok, was_open)
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -1512,7 +1669,7 @@ class App:
                             value=100.0 * index / len(names))
                         self.sd_state.configure(
                             text="%d/%d clips" % (index, len(names)))
-            self.root.after(0, self.push_done, ok, len(names))
+            self.ui(self.push_done, ok, len(names))
 
         self.run_worker(work, "Pushing files...")
 
@@ -1530,9 +1687,9 @@ class App:
                                     bufsize=1)
             for line in proc.stdout:
                 proc_line = line.rstrip("\r\n")
-                self.root.after(0, self._append_sd, proc_line)
+                self.ui(self._append_sd, proc_line)
             code = proc.wait()
-            self.root.after(0, self._append_sd,
+            self.ui(self._append_sd,
                             "== %s ==" % ("PASS" if code == 0 else "FAIL"))
 
         threading.Thread(target=work, daemon=True).start()
@@ -1582,6 +1739,57 @@ class App:
     def on_close(self):
         self.device.close()
         self.root.destroy()
+
+
+def take_screenshots(directory, port=None):
+    """Render every tab and grab it; a development check for layout overlap."""
+    from PIL import ImageGrab
+    os.makedirs(directory, exist_ok=True)
+    root = tk.Tk()
+    app = App(root)
+    root.geometry("1180x820+40+40")
+    root.attributes("-topmost", True)
+    root.update()
+    time.sleep(0.4)
+
+    if port:
+        for index, (dev, _label, _vid, _pid) in enumerate(app.ports):
+            if dev == port:
+                app.port_box.current(index)
+        app.toggle_connect()
+        deadline = time.time() + 20
+        while time.time() < deadline and not app.device.open:
+            root.update()
+            time.sleep(0.1)
+        deadline = time.time() + 20
+        while time.time() < deadline and app.device.busy:
+            root.update()
+            time.sleep(0.1)
+        end = time.time() + 5.5
+        while time.time() < end:
+            root.update()
+            time.sleep(0.1)
+
+    def shot(name):
+        root.update()
+        time.sleep(0.25)
+        root.update()
+        x, y = root.winfo_rootx(), root.winfo_rooty()
+        width, height = root.winfo_width(), root.winfo_height()
+        ImageGrab.grab(bbox=(x, y, x + width, y + height)).save(
+            os.path.join(directory, "gui-%s.png" % name))
+
+    for index, name in enumerate(("dashboard", "console", "settings",
+                                  "firmware", "sd", "power")):
+        app.tabs.select(index)
+        shot(name)
+    app.tabs.select(2)
+    for index, name in enumerate(("device", "display", "colors", "status",
+                                  "clock", "wifi", "voice")):
+        app.s_settings_tabs.select(index)
+        shot("settings-" + name)
+    root.destroy()
+    print("screenshots written to", directory)
 
 
 def selftest():
@@ -1723,8 +1931,17 @@ def autotest(port, log_path=None, image=None):
 
 def main():
     args = sys.argv[1:]
+    enable_dpi_awareness()
     if "--selftest" in args:
         selftest()
+        return 0
+    if "--screenshots" in args:
+        index = args.index("--screenshots")
+        if index + 1 >= len(args):
+            print("usage: --screenshots <directory> [port]")
+            return 2
+        port = args[index + 2] if index + 2 < len(args) else None
+        take_screenshots(args[index + 1], port)
         return 0
     if "--autotest" in args:
         index = args.index("--autotest")

@@ -51,6 +51,10 @@ void mosu_ui_set_touch_cb(mosu_ui_touch_cb_t cb, void *user);
 /* Force a full repaint; used every time the panel is switched back on. */
 void mosu_ui_refresh(void);
 
+/* Render and flush synchronously.  The wake path uses it while the panel is
+ * still dark, so sleep-in cannot show undefined GRAM content. */
+void mosu_ui_render_now(void);
+
 /*
  * Draw a bring-up pattern instead of the clock.  The patterns are absolute:
  * the burn-in pixel shift is ignored so the edges of the glass and the panel

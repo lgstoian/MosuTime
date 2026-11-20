@@ -178,7 +178,8 @@ static void test_wrist(void)
 
     EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 1000));
     EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 1100));
-    EXPECT(mosu_wrist_update(&wrist, &up, &cfg, 1300));
+    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 1300));
+    EXPECT(mosu_wrist_update(&wrist, &up, &cfg, 1450));
 
     /* Holding the new orientation does not retrigger. */
     EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 2000));
@@ -193,8 +194,9 @@ static void test_wrist(void)
 
     /* Lowering the arm is also a large change: it must respect refractory. */
     EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 2000));
-    EXPECT(mosu_wrist_update(&wrist, &up, &cfg, 2200));
-    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 2400));
+    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 2200));
+    EXPECT(mosu_wrist_update(&wrist, &up, &cfg, 2350));
+    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 2500));
 }
 
 static void test_config(void)

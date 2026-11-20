@@ -193,8 +193,8 @@ void mosu_config_defaults(mosu_config_t *cfg)
     cfg->display.screen_on_ms = 15000;
     cfg->display.wake_on_touch = true;
     cfg->display.wake_on_motion = true;
-    cfg->display.motion_angle_deg = 35;
-    cfg->display.motion_refractory_ms = 2500;
+    cfg->display.motion_angle_deg = 50;
+    cfg->display.motion_refractory_ms = 5000;
     cfg->display.motion_poll_hz = 8;
     cfg->display.pixel_shift_sec = 180;
     cfg->display.tap_feedback_ms = 250;

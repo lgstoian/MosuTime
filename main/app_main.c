@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_attr.h"
 #include "esp_lvgl_port.h"
 #include "esp_pm.h"
 #include "esp_system.h"
@@ -28,6 +29,7 @@
 #include "mosu_core/mosu_layout.h"
 #include "mosu_diag.h"
 #include "mosu_net.h"
+#include "mosu_policy.h"
 #include "mosu_session.h"
 #include "mosu_time.h"
 #include "mosu_ui.h"
@@ -50,6 +52,43 @@ static mosu_config_t s_cfg;
 static bool s_have_ui;
 static bool s_display_ok;
 static bool s_lvgl_stopped;
+
+/* Power accounting for the `stats` console command.  Screen-on seconds and
+ * wake count are the two numbers that explain a short battery life.  They
+ * live in RTC memory so opening the USB console (which resets the CPU) does
+ * not wipe a measurement that started on battery. */
+#define MOSU_STATS_MAGIC 0x4D4F5355u
+/* RTC_NOINIT, not RTC_DATA: a plain CPU reset (the USB console opening does
+ * one) re-initialises .rtc.data, while .rtc.noinit survives it. */
+RTC_NOINIT_ATTR static uint32_t s_stats_magic;
+RTC_NOINIT_ATTR static uint32_t s_wake_count;
+RTC_NOINIT_ATTR static uint32_t s_screen_on_total_ms;
+RTC_NOINIT_ATTR static uint32_t s_baseline_epoch;
+RTC_NOINIT_ATTR static uint8_t s_boot_pct;
+RTC_NOINIT_ATTR static bool s_boot_pct_set;
+RTC_NOINIT_ATTR static uint32_t s_boot_count;
+static uint32_t s_screen_on_since_ms;
+
+/* Learned screen policy: it adapts the wrist threshold and the lit window to
+ * how often the wearer actually looks at the watch. */
+static mosu_power_learn_t s_power_learn;
+static uint32_t s_power_last_ms;
+static uint32_t s_power_window_start;
+
+static void stats_init(void)
+{
+    if (s_stats_magic == MOSU_STATS_MAGIC) {
+        s_boot_count++;
+        return;
+    }
+    s_stats_magic = MOSU_STATS_MAGIC;
+    s_wake_count = 0;
+    s_screen_on_total_ms = 0;
+    s_baseline_epoch = 0;
+    s_boot_pct = 0;
+    s_boot_pct_set = false;
+    s_boot_count = 1;
+}
 
 static esp_pm_lock_handle_t s_display_lock;
 
@@ -134,6 +173,16 @@ static void update_battery(bool immediate)
 
     uint8_t shown = mosu_session_battery(&s_session, pmu.percent,
                                          pmu.battery_present, immediate);
+    if (!s_boot_pct_set && pmu.battery_present) {
+        s_boot_pct = pmu.percent;
+        s_boot_pct_set = true;
+    }
+    if (s_baseline_epoch == 0) {
+        time_t now = time(NULL);
+        if (now > 1600000000) {
+            s_baseline_epoch = (uint32_t)now;
+        }
+    }
     mosu_ui_set_battery(shown, pmu.battery_present);
 }
 
@@ -155,11 +204,11 @@ static void screen_on(bool via_touch)
         return;
     }
 
+    /* Sleep out first, but keep the display dark until the first frame is
+     * rendered: sleep-in loses the GRAM, so an early display-on would show
+     * undefined pixels for a frame. */
     if (s_display_ok) {
-        mosu_board_display_on();
-        /* Brightness is restored on every wake: switching the panel off
-         * sets it to zero. */
-        mosu_board_brightness_set(s_cfg.display.brightness);
+        mosu_board_display_prepare_wake();
         mosu_board_enable_touch_wake(false);
     }
 
@@ -171,16 +220,25 @@ static void screen_on(bool via_touch)
         update_time();
         update_battery(true);
         update_wifi_icon();
-        mosu_ui_refresh();
         if (s_lvgl_stopped) {
             lvgl_port_resume();
             s_lvgl_stopped = false;
         }
+        mosu_ui_render_now();
+    }
+
+    if (s_display_ok) {
+        mosu_board_display_on();
+        /* Brightness is restored on every wake: switching the panel off
+         * sets it to zero. */
+        mosu_board_brightness_set(s_cfg.display.brightness);
     }
 
     taskENTER_CRITICAL(&s_session_mux);
     mosu_session_screen_on(&s_session, now_ms());
     taskEXIT_CRITICAL(&s_session_mux);
+    s_wake_count++;
+    s_screen_on_since_ms = now_ms();
 
     ESP_LOGI(TAG, "screen on (%s)", via_touch ? "touch" : "motion");
 }
@@ -206,6 +264,7 @@ static void screen_off(void)
     taskENTER_CRITICAL(&s_session_mux);
     mosu_session_screen_off(&s_session, now_ms());
     taskEXIT_CRITICAL(&s_session_mux);
+    s_screen_on_total_ms += now_ms() - s_screen_on_since_ms;
     mosu_wrist_reset(&s_wrist);
 
     ESP_LOGI(TAG, "screen off");
@@ -343,6 +402,77 @@ static void diag_power_idle(void)
     s_diag_pattern_request = (int)MOSU_UI_TEST_NONE;
 }
 
+static void apply_power_learning(void)
+{
+    uint16_t angle = mosu_power_learn_angle(&s_power_learn,
+                                            s_cfg.display.motion_angle_deg);
+    s_wrist_cfg.angle_mdeg = angle * 1000u;
+
+    uint32_t screen =
+        mosu_power_learn_screen_ms(&s_power_learn, s_cfg.display.screen_on_ms);
+    taskENTER_CRITICAL(&s_session_mux);
+    mosu_session_set_screen_on_ms(&s_session, screen);
+    taskEXIT_CRITICAL(&s_session_mux);
+
+    ESP_LOGI(TAG, "auto power: angle %u deg, screen %u ms (bonus +%u, cut %u)",
+             (unsigned)angle, (unsigned)screen, s_power_learn.angle_bonus,
+             (unsigned)s_power_learn.screen_cut_ms);
+}
+
+static void diag_stats(mosu_diag_stats_t *out)
+{
+    if (!out) {
+        return;
+    }
+    memset(out, 0, sizeof(*out));
+
+    time_t now = time(NULL);
+    uint32_t elapsed = 0;
+    if (s_baseline_epoch && now > (time_t)s_baseline_epoch) {
+        elapsed = (uint32_t)(now - (time_t)s_baseline_epoch);
+    }
+    if (elapsed == 0) {
+        elapsed = now_ms() / 1000u;
+    }
+    out->uptime_s = elapsed;
+    out->wakes = s_wake_count;
+    out->boots = s_boot_count;
+    out->boot_pct = s_boot_pct_set ? s_boot_pct : 0;
+
+    uint32_t on_ms = s_screen_on_total_ms;
+    if (mosu_session_is_on(&s_session)) {
+        on_ms += now_ms() - s_screen_on_since_ms;
+    }
+    out->screen_on_s = on_ms / 1000u;
+    out->screen_ms = mosu_power_learn_screen_ms(&s_power_learn,
+                                                s_cfg.display.screen_on_ms);
+    out->angle_deg = (uint8_t)mosu_power_learn_angle(
+        &s_power_learn, s_cfg.display.motion_angle_deg);
+
+    mosu_board_pmu_t pmu;
+    if (mosu_board_pmu_read(&pmu) == ESP_OK) {
+        out->battery_present = pmu.battery_present;
+        out->charging = pmu.charging;
+        out->battery_mv = pmu.millivolts;
+        out->battery_pct = pmu.percent;
+    }
+}
+
+static void diag_stats_reset(void)
+{
+    mosu_board_pmu_t pmu;
+    if (mosu_board_pmu_read(&pmu) != ESP_OK || !pmu.battery_present) {
+        return;
+    }
+    time_t now = time(NULL);
+    s_baseline_epoch = now > 1600000000 ? (uint32_t)now : 0;
+    s_boot_pct = pmu.percent;
+    s_boot_pct_set = true;
+    s_wake_count = 0;
+    s_screen_on_total_ms = 0;
+    s_screen_on_since_ms = now_ms();
+}
+
 static const mosu_diag_hooks_t s_diag_hooks = {
     .wake = diag_wake,
     .screen_on = diag_screen_on,
@@ -350,6 +480,8 @@ static const mosu_diag_hooks_t s_diag_hooks = {
     .test_pattern = diag_test_pattern,
     .power_wifi = diag_power_wifi,
     .power_idle = diag_power_idle,
+    .stats = diag_stats,
+    .stats_reset = diag_stats_reset,
 };
 
 static void handle_diag_requests(void)
@@ -385,6 +517,7 @@ static void handle_diag_requests(void)
 
 void app_main(void)
 {
+    stats_init();
     init_nvs();
 
     esp_log_level_set("*", ESP_LOG_INFO);
@@ -479,9 +612,24 @@ void app_main(void)
     uint32_t battery_poll = now_ms();
     uint32_t wifi_poll = 0;
 
+    mosu_power_learn_init(&s_power_learn);
+    s_power_last_ms = now_ms();
+    s_power_window_start = s_power_last_ms;
+
     for (;;) {
         handle_diag_requests();
         uint32_t now = now_ms();
+
+        uint32_t dt = now - s_power_last_ms;
+        s_power_last_ms = now;
+        mosu_power_learn_note(&s_power_learn, dt,
+                              mosu_session_is_on(&s_session));
+        if ((uint32_t)(now - s_power_window_start) >= 3600000u) {
+            s_power_window_start = now;
+            if (mosu_power_learn_tick(&s_power_learn, 3600000u)) {
+                apply_power_learning();
+            }
+        }
 
         if (mosu_session_is_on(&s_session)) {
             update_time();

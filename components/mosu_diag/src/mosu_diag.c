@@ -392,7 +392,7 @@ static void handle_line(char *line)
 
     if (!strcmp(line, "help") || !strcmp(line, "?")) {
         printf("commands:\n");
-        printf("  status time sync say settime bright vol tap reboot version\n");
+        printf("  status stats [reset] time sync say settime bright vol tap reboot version\n");
         printf("  i2c pmu rtc imu pm heap tasks display config\n");
         printf("  test screen [colors|grid|corners|off]\n");
         printf("  test touch | test audio | sd remount | sd verbose | sd dump\n");
@@ -453,6 +453,42 @@ static void handle_line(char *line)
                mac[2], mac[3], mac[4], mac[5]);
         printf("chip   : ESP32-S3 rev %d.%d, %d core(s)\n",
                chip.revision / 100, chip.revision % 100, chip.cores);
+    } else if (!strcmp(line, "stats")) {
+        mosu_diag_stats_t stats;
+        if (!s_hooks.stats) {
+            printf("stats: no hook\n");
+            return;
+        }
+        s_hooks.stats(&stats);
+        const uint32_t minutes = stats.uptime_s / 60u;
+        printf("stats : up %uh%02um, screen on %um (%u%%), %u wakes, %u boots\n",
+               (unsigned)(minutes / 60u), (unsigned)(minutes % 60u),
+               (unsigned)(stats.screen_on_s / 60u),
+               stats.uptime_s ? (unsigned)(stats.screen_on_s * 100u /
+                                           stats.uptime_s)
+                              : 0u,
+               (unsigned)stats.wakes, (unsigned)stats.boots);
+        printf("power : %u mV, %u%%, charging %d, boot %u%%\n",
+               (unsigned)stats.battery_mv, (unsigned)stats.battery_pct,
+               (int)stats.charging, (unsigned)stats.boot_pct);
+        printf("auto  : screen %u s, raise angle %u deg\n",
+               (unsigned)(stats.screen_ms / 1000u), (unsigned)stats.angle_deg);
+        if (!stats.charging && stats.battery_present && stats.uptime_s > 600 &&
+            stats.boot_pct > stats.battery_pct) {
+            const unsigned used = stats.boot_pct - stats.battery_pct;
+            const double hours = stats.uptime_s / 3600.0;
+            const double ma = used * 4.0 / hours;
+            printf("drain : %u%% in %.1f h, about %.1f mA average "
+                   "(400 mAh cell, estimate)\n",
+                   used, hours, ma);
+        }
+    } else if (!strcmp(line, "stats reset")) {
+        if (!s_hooks.stats_reset) {
+            printf("stats: no hook\n");
+            return;
+        }
+        s_hooks.stats_reset();
+        printf("stats: baseline reset at the current battery percentage\n");
     } else if (!strcmp(line, "status")) {
         print_status();
     } else if (!strcmp(line, "time")) {

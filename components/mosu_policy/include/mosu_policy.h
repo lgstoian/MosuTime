@@ -19,6 +19,10 @@ extern "C" {
 
 #define MOSU_POLICY_TZ_MAX 64
 #define MOSU_POLICY_SYNC_RETRIES 3
+#define MOSU_WIFI_HOURS 24
+#define MOSU_POWER_ANGLE_MAX 14
+#define MOSU_POWER_CUT_MAX_MS 7000
+#define MOSU_POWER_SCREEN_MIN_MS 8000
 
 /*
  * True when the text is a bare numeric UTC offset: an optional sign followed
@@ -80,6 +84,59 @@ void mosu_policy_parse_geo(const char *body, mosu_policy_geo_t *out);
  */
 uint32_t mosu_policy_next_sync_s(uint8_t fail_count,
                                  uint32_t sync_interval_s);
+
+/*
+ * Learned Wi-Fi schedule.
+ *
+ * The radio is off between syncs, but a failed sync starts presence scans.
+ * Scanning every 15 minutes all day is wasteful when the watch is away from
+ * home: the score per local hour learns which hours actually have the access
+ * point in range, and the scan interval follows it.  Scores are neutral (128)
+ * at first, rise quickly on success and fall slowly on failure.
+ */
+typedef struct {
+    uint8_t score[MOSU_WIFI_HOURS];
+} mosu_wifi_learn_t;
+
+void mosu_wifi_learn_init(mosu_wifi_learn_t *learn);
+void mosu_wifi_learn_note(mosu_wifi_learn_t *learn, uint8_t hour, bool ok);
+uint8_t mosu_wifi_learn_score(const mosu_wifi_learn_t *learn, uint8_t hour);
+/* Seconds between presence scans for this hour: 15 min when the hour is
+ * usually online, up to 4 h when it is almost never online. */
+uint32_t mosu_wifi_learn_scan_s(const mosu_wifi_learn_t *learn, uint8_t hour);
+
+/*
+ * Learned screen policy.
+ *
+ * The battery cost is dominated by screen-on seconds, so the watch measures
+ * its own duty cycle per hour.  A busy hour (>=12% lit or >=10 wakes) raises
+ * the wrist threshold by a step and shortens the lit window; three calm hours
+ * in a row give a step back.  The offsets are bounded: at most +14 degrees
+ * and -7 s, never below an 8 s window.  The configured values stay the
+ * baseline, so a reboot returns to them and the config file remains the
+ * source of truth.
+ */
+typedef struct {
+    uint8_t angle_bonus;    /* degrees above the configured angle, 0..14 */
+    uint16_t screen_cut_ms; /* milliseconds below screen_on_ms, 0..7000 */
+    uint32_t window_ms;     /* time accumulated in this window */
+    uint32_t screen_ms;     /* lit time in this window */
+    uint32_t wakes;         /* screen turns in this window */
+    uint8_t calm_hours;
+    uint32_t since_change_ms;
+    bool was_on;
+} mosu_power_learn_t;
+
+void mosu_power_learn_init(mosu_power_learn_t *learn);
+/* dt_ms since the previous call; screen_on is the current panel state. */
+void mosu_power_learn_note(mosu_power_learn_t *learn, uint32_t dt_ms,
+                           bool screen_on);
+/* Close a window (normally one hour); true when the offsets changed. */
+bool mosu_power_learn_tick(mosu_power_learn_t *learn, uint32_t window_ms);
+uint16_t mosu_power_learn_angle(const mosu_power_learn_t *learn,
+                                uint16_t base_deg);
+uint32_t mosu_power_learn_screen_ms(const mosu_power_learn_t *learn,
+                                    uint32_t base_ms);
 
 #ifdef __cplusplus
 }

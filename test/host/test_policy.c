@@ -198,6 +198,81 @@ static void test_backoff(void)
     EXPECT(mosu_policy_next_sync_s(4, 0) == hour);
 }
 
+static void test_wifi_learn(void)
+{
+    mosu_wifi_learn_t learn;
+    mosu_wifi_learn_init(&learn);
+
+    EXPECT(mosu_wifi_learn_score(&learn, 9) == 128);
+    EXPECT(mosu_wifi_learn_scan_s(&learn, 9) == 30 * 60);
+
+    mosu_wifi_learn_note(&learn, 9, true);
+    EXPECT(mosu_wifi_learn_score(&learn, 9) > 128);
+    for (int i = 0; i < 20; i++) {
+        mosu_wifi_learn_note(&learn, 9, true);
+    }
+    EXPECT(mosu_wifi_learn_scan_s(&learn, 9) == 15 * 60);
+
+    for (int i = 0; i < 200; i++) {
+        mosu_wifi_learn_note(&learn, 3, false);
+    }
+    EXPECT(mosu_wifi_learn_score(&learn, 3) < 24);
+    EXPECT(mosu_wifi_learn_scan_s(&learn, 3) == 4 * 60 * 60);
+
+    /* An invalid hour is ignored, not written out of bounds. */
+    mosu_wifi_learn_note(&learn, 24, true);
+    EXPECT(mosu_wifi_learn_score(&learn, 24) == 128);
+    EXPECT(mosu_wifi_learn_scan_s(&learn, 24) == 30 * 60);
+}
+
+static void test_power_learn(void)
+{
+    mosu_power_learn_t learn;
+    mosu_power_learn_init(&learn);
+    EXPECT(mosu_power_learn_angle(&learn, 50) == 50);
+    EXPECT(mosu_power_learn_screen_ms(&learn, 15000) == 15000);
+
+    /* A busy hour cannot change the policy on its own: the first tick starts
+     * the cooldown. */
+    for (int i = 0; i < 60; i++) {
+        mosu_power_learn_note(&learn, 60000, true);
+    }
+    EXPECT(!mosu_power_learn_tick(&learn, 3600000));
+
+    /* Three busy hours take one step. */
+    for (int h = 0; h < 3; h++) {
+        for (int i = 0; i < 60; i++) {
+            mosu_power_learn_note(&learn, 60000, true);
+        }
+        mosu_power_learn_tick(&learn, 3600000);
+    }
+    EXPECT(learn.angle_bonus > 0);
+    EXPECT(mosu_power_learn_angle(&learn, 50) > 50);
+    EXPECT(mosu_power_learn_screen_ms(&learn, 15000) < 15000);
+
+    /* The offsets stop at their bounds. */
+    for (int h = 0; h < 60; h++) {
+        for (int i = 0; i < 60; i++) {
+            mosu_power_learn_note(&learn, 60000, true);
+        }
+        mosu_power_learn_tick(&learn, 3600000);
+    }
+    EXPECT(learn.angle_bonus == MOSU_POWER_ANGLE_MAX);
+    EXPECT(learn.screen_cut_ms == MOSU_POWER_CUT_MAX_MS);
+    EXPECT(mosu_power_learn_angle(&learn, 70) == 80);
+    EXPECT(mosu_power_learn_screen_ms(&learn, 9000) ==
+           MOSU_POWER_SCREEN_MIN_MS);
+
+    /* Calm hours give a step back, never below the configured values. */
+    for (int h = 0; h < 12; h++) {
+        for (int i = 0; i < 60; i++) {
+            mosu_power_learn_note(&learn, 60000, false);
+        }
+        mosu_power_learn_tick(&learn, 3600000);
+    }
+    EXPECT(learn.angle_bonus < MOSU_POWER_ANGLE_MAX);
+}
+
 void test_policy(void)
 {
     test_offsets();
@@ -205,4 +280,6 @@ void test_policy(void)
     test_geo();
     test_zone_plausible();
     test_backoff();
+    test_wifi_learn();
+    test_power_learn();
 }

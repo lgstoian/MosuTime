@@ -95,6 +95,10 @@ bool mosu_session_take_wake(mosu_session_t *session);
 void mosu_session_screen_on(mosu_session_t *session, uint32_t now_ms);
 void mosu_session_screen_off(mosu_session_t *session, uint32_t now_ms);
 
+/* The adaptive power policy adjusts the lit window at runtime; the configured
+ * value stays the baseline and the session clamps every change. */
+void mosu_session_set_screen_on_ms(mosu_session_t *session, uint32_t ms);
+
 bool mosu_session_is_on(const mosu_session_t *session);
 
 /* Refresh the inactivity deadline without changing the screen state. */

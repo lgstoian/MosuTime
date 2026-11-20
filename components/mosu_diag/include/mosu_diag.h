@@ -14,6 +14,20 @@ extern "C" {
 #endif
 
 typedef struct {
+    uint32_t uptime_s;
+    uint32_t screen_on_s;
+    uint32_t wakes;
+    uint32_t boots;
+    uint16_t battery_mv;
+    uint16_t screen_ms;
+    uint8_t battery_pct;
+    uint8_t boot_pct;
+    uint8_t angle_deg;
+    bool battery_present;
+    bool charging;
+} mosu_diag_stats_t;
+
+typedef struct {
     /* Wake the face for one normal activity window without forcing it on. */
     void (*wake)(void);
     void (*screen_on)(void);
@@ -22,6 +36,10 @@ typedef struct {
     void (*test_pattern)(int pattern);
     void (*power_wifi)(void);
     void (*power_idle)(void);
+    /* Fills the power accounting: uptime, screen-on seconds, wakes, battery. */
+    void (*stats)(mosu_diag_stats_t *out);
+    /* Start a new measurement window at the current battery percentage. */
+    void (*stats_reset)(void);
 } mosu_diag_hooks_t;
 
 /*
