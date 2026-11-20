@@ -11,6 +11,7 @@
 #include <string.h>
 #include <sys/time.h>
 
+#include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_system.h"
 
@@ -26,6 +27,12 @@ static volatile char *s_tz = s_tz_buf[0];
 static bool s_valid;
 static bool s_have_sync;
 static time_t s_last_sync;
+
+/* The USB console resets the CPU when it opens, so keep the last sync time in
+ * RTC no-init memory: the icon must not go grey after plugging the cable in. */
+#define MOSU_SYNC_MAGIC 0x53594E43u
+RTC_NOINIT_ATTR static uint32_t s_sync_magic;
+RTC_NOINIT_ATTR static time_t s_saved_sync;
 
 typedef struct {
     const char *iana;
@@ -220,6 +227,11 @@ esp_err_t mosu_time_init(const mosu_config_t *cfg)
     s_have_sync = false;
     s_last_sync = 0;
 
+    if (s_sync_magic == MOSU_SYNC_MAGIC && s_saved_sync > 1600000000) {
+        s_last_sync = s_saved_sync;
+        s_have_sync = true;
+    }
+
     const char *configured = cfg ? cfg->clock.timezone : "UTC0";
     char stored[MOSU_CFG_TZ_MAX];
 
@@ -286,6 +298,8 @@ esp_err_t mosu_time_set_epoch(time_t utc)
     s_valid = true;
     s_have_sync = true;
     s_last_sync = utc;
+    s_saved_sync = utc;
+    s_sync_magic = MOSU_SYNC_MAGIC;
     mosu_time_persist_rtc();
     ESP_LOGI(TAG, "clock synced");
     return ESP_OK;
