@@ -15,7 +15,10 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "esp_app_desc.h"
+#include "esp_chip_info.h"
 #include "esp_log.h"
+#include "esp_mac.h"
 #include "esp_rom_crc.h"
 #include "esp_system.h"
 #include "esp_timer.h"
@@ -388,7 +391,7 @@ static void handle_line(char *line)
 
     if (!strcmp(line, "help") || !strcmp(line, "?")) {
         printf("commands:\n");
-        printf("  status time sync say settime bright vol tap reboot\n");
+        printf("  status time sync say settime bright vol tap reboot version\n");
         printf("  i2c pmu rtc imu pm heap tasks display config\n");
         printf("  test screen [colors|grid|corners|off]\n");
         printf("  test touch | test audio | sd remount | sd verbose | sd dump\n");
@@ -436,6 +439,19 @@ static void handle_line(char *line)
         list_dir("/sdcard");
     } else if (!strncmp(line, "ls ", 3)) {
         list_dir(line + 3);
+    } else if (!strcmp(line, "version")) {
+        const esp_app_desc_t *app = esp_app_get_description();
+        esp_chip_info_t chip;
+        esp_chip_info(&chip);
+        uint8_t mac[6] = {0};
+        esp_read_mac(mac, ESP_MAC_WIFI_STA);
+        printf("app    : %s %s, built %s %s\n", app->project_name,
+               app->version, app->date, app->time);
+        printf("idf    : %s\n", app->idf_ver);
+        printf("mac    : %02X:%02X:%02X:%02X:%02X:%02X\n", mac[0], mac[1],
+               mac[2], mac[3], mac[4], mac[5]);
+        printf("chip   : ESP32-S3 rev %d.%d, %d core(s)\n",
+               chip.revision / 100, chip.revision % 100, chip.cores);
     } else if (!strcmp(line, "status")) {
         print_status();
     } else if (!strcmp(line, "time")) {

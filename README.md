@@ -122,9 +122,17 @@ also works, but the FAT table must be complete: some Windows formatters write a
 FAT32 volume that Windows accepts and FatFs rejects (`failed to mount card
 (13)`, `FR_NO_FILESYSTEM`). `sd format yes` or `--format` is the reliable path.
 
+### Windows app
+
+`tools/mosu-gui.cmd` (or `python tools/mosu_gui.py`) opens a small manager for
+the watch: a dashboard with firmware version, MAC, clock, battery and SD state;
+a console tab; build and flash through `tools/build.ps1`; SD format and file
+push; and a shutdown button. It needs `pyserial` (`python -m pip install
+pyserial`) and the same ESP-IDF 5.5.x installation as the build script.
+
 Edit the Wi-Fi network and brightness in `sd_card/mosu.cfg` (or pass `--ssid`
 and `--pass` to the push tool), generate the voice with the script below, then
-push both with `tools/push_sd.py`.
+push both with `tools/push_sd.py` or the app's SD tab.
 
 ### Configuration
 

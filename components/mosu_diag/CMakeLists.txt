@@ -9,7 +9,8 @@ idf_component_register(
         mosu_net
         mosu_time
         mosu_ui
+        app_update
+        esp_driver_usb_serial_jtag
         esp_system
         freertos
-        esp_driver_usb_serial_jtag
 )

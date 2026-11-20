@@ -217,6 +217,10 @@ Windows wrapper:
 .\tools\build.ps1 -Port COM11 -Flash -Monitor
 ```
 
+The Windows app does the same thing without a terminal: `tools/mosu-gui.cmd`,
+tab **Firmware**, **Build and flash**. It closes the console port first so
+esptool can take it, streams the build output and reconnects afterwards.
+
 The board's USB-C is the ESP32-S3 native USB, and the firmware console is
 USB Serial/JTAG, so the same COM port carries flashing, logs and console
 commands. UART0 is only on the reserved pads.
