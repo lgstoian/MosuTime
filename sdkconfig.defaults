@@ -75,3 +75,9 @@ CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 
 # No Bluetooth: the watch uses Wi-Fi only, for the time sync.
 CONFIG_BT_ENABLED=n
+
+# Quiet by default: every log line is USB traffic and CPU time, and writes can
+# block when no host is reading. Raise the level in mosu.cfg at runtime.
+CONFIG_BOOTLOADER_LOG_LEVEL_ERROR=y
+CONFIG_LOG_DEFAULT_LEVEL_ERROR=y
+CONFIG_LOG_MAXIMUM_LEVEL_VERBOSE=y

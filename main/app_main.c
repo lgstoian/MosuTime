@@ -238,8 +238,10 @@ static void screen_on(bool via_touch)
     taskENTER_CRITICAL(&s_session_mux);
     mosu_session_screen_on(&s_session, now_ms());
     taskEXIT_CRITICAL(&s_session_mux);
-    s_wake_count++;
-    s_screen_on_since_ms = now_ms();
+    if (s_cfg.device.stats) {
+        s_wake_count++;
+        s_screen_on_since_ms = now_ms();
+    }
     mosu_power_learn_wake(&s_power_learn, via_touch);
 
     ESP_LOGI(TAG, "screen on (%s)", via_touch ? "touch" : "motion");
@@ -267,7 +269,9 @@ static void screen_off(void)
     taskENTER_CRITICAL(&s_session_mux);
     mosu_session_screen_off(&s_session, now_ms());
     taskEXIT_CRITICAL(&s_session_mux);
-    s_screen_on_total_ms += now_ms() - s_screen_on_since_ms;
+    if (s_cfg.device.stats) {
+        s_screen_on_total_ms += now_ms() - s_screen_on_since_ms;
+    }
     mosu_wrist_reset(&s_wrist);
 
     ESP_LOGI(TAG, "screen off");
@@ -430,6 +434,9 @@ static void diag_stats(mosu_diag_stats_t *out)
         return;
     }
     memset(out, 0, sizeof(*out));
+    if (!s_cfg.device.stats) {
+        return;
+    }
 
     time_t now = time(NULL);
     uint32_t elapsed = 0;
@@ -471,6 +478,9 @@ static void diag_stats(mosu_diag_stats_t *out)
 
 static void diag_stats_reset(void)
 {
+    if (!s_cfg.device.stats) {
+        return;
+    }
     mosu_board_pmu_t pmu;
     if (mosu_board_pmu_read(&pmu) != ESP_OK || !pmu.battery_present) {
         return;
@@ -535,8 +545,8 @@ void app_main(void)
     stats_init();
     init_nvs();
 
-    esp_log_level_set("*", ESP_LOG_INFO);
-    esp_log_level_set("mosu", ESP_LOG_INFO);
+    esp_log_level_set("*", ESP_LOG_ERROR);
+    esp_log_level_set("mosu", ESP_LOG_ERROR);
 
     esp_err_t err = mosu_board_init();
     if (err != ESP_OK) {
@@ -545,6 +555,7 @@ void app_main(void)
 
     load_config();
     esp_log_level_set("*", log_level_for(s_cfg.device.log_level));
+    mosu_board_display_set_panel_sleep(s_cfg.display.panel_sleep);
 
     s_wrist_cfg.angle_mdeg =
         (uint16_t)(s_cfg.display.motion_angle_deg * 1000u);
@@ -613,6 +624,7 @@ void app_main(void)
 
     uint32_t battery_poll = now_ms();
     uint32_t wifi_poll = 0;
+    uint32_t clock_poll = 0;
 
     mosu_power_learn_init(&s_power_learn);
     s_power_last_ms = now_ms();
@@ -634,7 +646,12 @@ void app_main(void)
         }
 
         if (mosu_session_is_on(&s_session)) {
-            update_time();
+            /* The face only changes on the minute; reading the RTC ten times a
+             * second buys nothing and keeps an I2C transaction in the loop. */
+            if (clock_poll == 0 || (uint32_t)(now - clock_poll) >= 1000u) {
+                update_time();
+                clock_poll = now;
+            }
 
             bool say;
             taskENTER_CRITICAL(&s_session_mux);
@@ -653,7 +670,7 @@ void app_main(void)
                 battery_poll = now;
             }
 
-            if (wifi_poll == 0 || (uint32_t)(now - wifi_poll) >= 2000u) {
+            if (wifi_poll == 0 || (uint32_t)(now - wifi_poll) >= 5000u) {
                 update_wifi_icon();
                 wifi_poll = now;
             }
@@ -706,10 +723,12 @@ void app_main(void)
 
         mosu_accel_t sample = {accel.x, accel.y, accel.z};
         if (mosu_wrist_update(&s_wrist, &sample, &s_wrist_cfg, now_ms())) {
-            s_raise_fired++;
-            s_raise_candidates = s_wrist.candidates;
-            s_last_raise_deg = (uint8_t)(s_wrist.last_angle_deg + 0.5f);
-            s_last_raise_nz_milli = (int16_t)(s_wrist.last_nz * 1000.0f);
+            if (s_cfg.device.stats) {
+                s_raise_fired++;
+                s_raise_candidates = s_wrist.candidates;
+                s_last_raise_deg = (uint8_t)(s_wrist.last_angle_deg + 0.5f);
+                s_last_raise_nz_milli = (int16_t)(s_wrist.last_nz * 1000.0f);
+            }
             ESP_LOGI(TAG, "raise: %.0f deg, nz %.2f, %u candidates",
                      (double)s_wrist.last_angle_deg, (double)s_wrist.last_nz,
                      (unsigned)s_wrist.candidates);

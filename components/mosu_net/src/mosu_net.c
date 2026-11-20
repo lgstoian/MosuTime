@@ -522,16 +522,27 @@ static void net_task(void *arg)
                      (unsigned)(scan / 60u));
         }
 
-        uint32_t wait_s = 60;
-        if ((int32_t)(s_next_sync_s - now) > 0) {
+        /* Sleep until the next scheduled event instead of waking every minute
+         * to look at the clock.  The console's sync request notifies the task,
+         * and the one-hour cap is only a safety net. */
+        uint32_t wait_s = 3600;
+        if (s_next_sync_s != 0 && (int32_t)(s_next_sync_s - now) > 0) {
             uint32_t until = s_next_sync_s - now;
             if (until < wait_s) {
                 wait_s = until;
             }
         }
+        if (s_next_presence_s != 0 &&
+            (int32_t)(s_next_presence_s - now) > 0) {
+            uint32_t until = s_next_presence_s - now;
+            if (until < wait_s) {
+                wait_s = until;
+            }
+        }
+        if (wait_s < 1) {
+            wait_s = 1;
+        }
 
-        /* Wake for a console sync request immediately; otherwise sleep in
-         * one-minute steps so the radio task costs almost nothing. */
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(wait_s * 1000u + 100u));
     }
 }

@@ -187,15 +187,20 @@ void mosu_config_defaults(mosu_config_t *cfg)
     memset(cfg, 0, sizeof(*cfg));
 
     copy_str(cfg->device.name, sizeof(cfg->device.name), "MosuTime");
-    cfg->device.log_level = 3; /* info */
+    /* Production is quiet: USB-Serial/JTAG log writes can block when no host
+     * is draining the port, and every line is CPU time on a 400 mAh cell.
+     * Raise this to info/debug in mosu.cfg when a problem needs looking at. */
+    cfg->device.log_level = 1; /* error */
+    cfg->device.stats = false;
 
     cfg->display.brightness = 55;
-    cfg->display.screen_on_ms = 15000;
+    cfg->display.screen_on_ms = 11250;
     cfg->display.wake_on_touch = true;
     cfg->display.wake_on_motion = true;
     cfg->display.motion_angle_deg = 45;
     cfg->display.motion_refractory_ms = 6000;
     cfg->display.motion_poll_hz = 10;
+    cfg->display.panel_sleep = false; /* enabled after the wake test */
     cfg->display.pixel_shift_sec = 180;
     cfg->display.tap_feedback_ms = 250;
 
@@ -354,6 +359,12 @@ static void apply_key(mosu_config_t *cfg, section_t section, const char *key,
                 report_warn(report, "unknown log level: %s", key);
                 return;
             }
+        } else if (!strcasecmp(key, "stats")) {
+            if (!parse_bool(value, &bval)) {
+                report_error(report, "invalid boolean for %s", key);
+                return;
+            }
+            cfg->device.stats = bval;
         } else {
             report_warn(report, "unknown key: %s", key);
             return;
@@ -415,6 +426,12 @@ static void apply_key(mosu_config_t *cfg, section_t section, const char *key,
                 return;
             }
             cfg->display.tap_feedback_ms = (uint16_t)ival;
+        } else if (!strcasecmp(key, "panel_sleep")) {
+            if (!parse_bool(value, &bval)) {
+                report_error(report, "invalid boolean for %s", key);
+                return;
+            }
+            cfg->display.panel_sleep = bval;
         } else {
             report_warn(report, "unknown key: %s", key);
             return;

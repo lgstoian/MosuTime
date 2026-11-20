@@ -157,7 +157,7 @@ reference.
 ```ini
 [display]
 brightness = 55          # 1..100, applied as the panel's own brightness
-screen_on_ms = 15000
+screen_on_ms = 11250
 
 [clock]
 auto_timezone = true
@@ -329,15 +329,15 @@ The USB/UART console is for maintenance, not for the wearer:
 
 ```
 help status time sync say settime bright N vol N tap reboot
-i2c pmu rtc imu motion [s] pm heap tasks display config mem
-pmu rail <dcdc1..5|aldo1..4|bldo1..2|dldo1..2|cpusldo> on|off
+i2c pmu rtc imu touch motion [s] pm heap tasks display config mem
+touch rate <monitor ms> <enter s> | pmu rail <name> on|off
 wifi <ssid> <password> | wifi scan | wifi presence | wifi clear
 test screen [colors|grid|corners|off] | test touch | test audio
 scene clock|blank
 screenshot [path] | sd remount | sd verbose | sd dump
 sd format yes | receive <path> <size> [/crc] | md <path> | ls [path]
-rm <path> | rx bench <bytes> | power screen on|off | power wifi | power idle
-poweroff | nvs erase
+rm <path> | rx bench <bytes> | power screen on|off | power panel on|off
+power wifi | power idle | poweroff | nvs erase
 ```
 
 `bright` and `vol` change the value at runtime; edit `mosu.cfg` to make it

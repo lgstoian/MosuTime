@@ -80,6 +80,7 @@ typedef struct {
     int32_t height;
     uint8_t brightness; /* configured percent, from the last set */
     bool on;
+    bool panel_sleep;
     uint32_t draw_buffer_pixels;
     bool double_buffer;
     bool buffer_dma;
@@ -95,6 +96,9 @@ esp_err_t mosu_board_display_start(void);
 lv_display_t *mosu_board_display(void);
 esp_err_t mosu_board_display_on(void);
 esp_err_t mosu_board_display_off(void);
+/* Panel 0x10 while off.  Loses the GRAM, so wake paints it black first. */
+void mosu_board_display_set_panel_sleep(bool on);
+bool mosu_board_display_panel_sleep(void);
 esp_err_t mosu_board_brightness_set(uint8_t percent);
 bool mosu_board_touch_active(void);
 /* Read-only snapshot for diagnostics; never fails, never touches the panel. */
@@ -131,6 +135,9 @@ bool mosu_board_rtc_valid(void);
 esp_err_t mosu_board_imu_init(void);
 esp_err_t mosu_board_imu_read(mosu_board_accel_t *out);
 
+/* Slow the FT3168 monitor scan (default 80 ms) to cut its idle current. */
+esp_err_t mosu_board_touch_tune(uint8_t monitor_ms, uint8_t enter_monitor_s);
+
 esp_err_t mosu_board_audio_init(void);
 esp_err_t mosu_board_audio_play_wav(const char *path, uint8_t volume);
 esp_err_t mosu_board_audio_beep(uint16_t hz, uint16_t ms);
@@ -147,6 +154,7 @@ esp_err_t mosu_board_enable_touch_wake(bool enable);
  */
 esp_err_t mosu_board_i2c_scan(void);
 void mosu_board_pmu_dump(void);
+void mosu_board_touch_dump(void);
 void mosu_board_rtc_dump(void);
 void mosu_board_imu_dump(void);
 void mosu_board_pm_dump(void);

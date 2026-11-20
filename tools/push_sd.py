@@ -175,7 +175,7 @@ def resync(console):
     return False
 
 
-def config_payload(ssid, password):
+def config_payload(ssid, password, stats=None):
     with open(CFG, "rb") as handle:
         text = handle.read().decode("utf-8")
     if ssid is not None:
@@ -184,6 +184,9 @@ def config_payload(ssid, password):
     if password is not None:
         text = text.replace('network1_pass = "parola"',
                             'network1_pass = "%s"' % password)
+    if stats is not None:
+        text = text.replace("stats = false",
+                            "stats = %s" % ("true" if stats else "false"))
     if "\n" not in text:
         text += "\n"
     return text.encode("utf-8")
@@ -200,6 +203,8 @@ def main():
                         help="replace the template Wi-Fi password")
     parser.add_argument("--no-voice", action="store_true",
                         help="upload only mosu.cfg")
+    parser.add_argument("--stats", action="store_true",
+                        help="enable the power counters in the pushed config")
     args = parser.parse_args()
 
     try:
@@ -220,7 +225,7 @@ def main():
         time.sleep(0.3)
 
         ok = True
-        cfg = config_payload(args.ssid, args.password)
+        cfg = config_payload(args.ssid, args.password, args.stats)
         if push_file(console, REMOTE_CFG, cfg, "mosu.cfg"):
             print("PUSH ok   %s (%d bytes)" % (REMOTE_CFG, len(cfg)),
                   flush=True)

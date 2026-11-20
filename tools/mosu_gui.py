@@ -246,13 +246,15 @@ class Field:
 SCHEMA = [
     Field("device", "name", "Device name", "text", "MosuTime",
           hint="Shown in the console only"),
-    Field("device", "log_level", "Log level", "enum", "info",
+    Field("device", "log_level", "Log level", "enum", "error",
           choices=["none", "error", "warn", "info", "debug", "verbose"],
-          hint="Console and USB log detail"),
+          hint="Console and USB log detail; error is the quiet default"),
+    Field("device", "stats", "Power stats", "bool", False,
+          hint="Count screen time and wakes (needed for a drain test)"),
 
     Field("display", "brightness", "Brightness", "int", 55, 1, 100,
           hint="1..100, the same at every wake"),
-    Field("display", "screen_on_ms", "Screen on time", "int", 15000, 1000,
+    Field("display", "screen_on_ms", "Screen on time", "int", 11250, 1000,
           300000, 500, hint="Milliseconds after a touch or wrist raise"),
     Field("display", "wake_on_touch", "Touch wake", "bool", True,
           hint="Touch the glass to light the face"),
@@ -268,6 +270,8 @@ SCHEMA = [
           10, hint="Move the face 1..2 px to avoid burn-in; 0 = off"),
     Field("display", "tap_feedback_ms", "Tap border", "int", 250, 0, 2000, 50,
           hint="Border flash after a double tap; 0 = none"),
+    Field("display", "panel_sleep", "Panel sleep", "bool", True,
+          hint="Cut the panel supply while off (saves current; test it)"),
 
     Field("colors", "background", "Background", "color", "#000000"),
     Field("colors", "time_am", "Time (AM)", "color", "#FFFFFF",

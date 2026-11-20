@@ -43,15 +43,15 @@ again, so heavy use is overestimated rather than understated. The model also
 assumes every raise passes the angle and refractory filters; change `--raises`
 to the number that actually reaches the screen if you have measured it.
 
-With the shipped defaults (400 mAh, brightness 55, 15 s screen-on, 8 Hz IMU,
-6 h sync, 20 touch/boot wakes and 60 wrist raises per day, 8 announcements)
-the model gives:
+With the shipped defaults (400 mAh, brightness 55, 11.25 s screen-on, 10 Hz
+IMU, 6 h sync, 20 touch/boot wakes and 60 wrist raises per day, 8
+announcements) the model gives:
 
 | Term | Average | Share |
 | --- | --- | --- |
 | Light sleep + touch controller idle | 2.10 mA | 66% |
-| IMU polling at 8 Hz | 0.48 mA | 15% |
-| Screen-on windows | 0.49 mA | 15% |
+| IMU polling at 10 Hz | 0.60 mA | 19% |
+| Screen-on windows (11.25 s) | 0.37 mA | 12% |
 | Speaking | 0.07 mA | 2% |
 | Wi-Fi sync | 0.04 mA | 1% |
 | **Total** | **3.18 mA** | **100%** |
@@ -116,9 +116,9 @@ Bluetooth is compiled out (`CONFIG_BT_ENABLED=n`, asserted in
 * **At low use**, the always-on housekeeping dominates: light sleep plus the
   touch controller. Nothing in the firmware can reduce the touch controller's
   idle current; only a different part or a different wake scheme can.
-* **At high use**, the screen-on windows take over. 200 wakes of 15 s at 35 mA
-  is 1.2 mA average on its own. `screen_on_ms` and the number of wrist raises
-  are the two biggest software levers.
+* **At high use**, the screen-on windows take over. 200 wakes of 11.25 s at
+  35 mA is 0.9 mA average on its own. `screen_on_ms` and the number of wrist
+  raises are the two biggest software levers.
 * **IMU polling** costs about 0.06 mA at 1 Hz, 0.24 mA at 4 Hz, 0.6 mA at
   10 Hz and 1.2 mA at 20 Hz under the model's 1.5 ms / 40 mA burst assumption.
   It buys wrist-raise latency, nothing else. The QMI8658 also has a
@@ -136,6 +136,27 @@ Bluetooth is compiled out (`CONFIG_BT_ENABLED=n`, asserted in
   negligible against a 3.18 mA total. Measure it before promising runtime,
   and increase the interval or disable `wifi_always_on`-style retries if it
   is too high.
+
+## Quiet by default
+
+Production is silent unless something fails:
+
+* `log_level = error` in `mosu.cfg` and in the Kconfig default, so boot and
+  background logs are not written over USB-Serial/JTAG. Writes can block when
+  no host is draining the port. Set `info` while diagnosing.
+* `stats = false`: the power counters and the `stats` command are off. They
+  are RAM-only and cost nothing measurable, but the switch removes even that.
+  Enable them for a drain test (`push_sd.py --stats`, or `stats = true`).
+* The console blocks on the USB driver instead of polling every 200 ms, and
+  the network task sleeps until the next scheduled sync or presence scan.
+* `screen_on_ms = 11250` (25% below the old 15 s; the hourly learner can
+  shorten it to 8 s).
+* The FT3168 touch controller scans every 80 ms in monitor mode (register
+  `0x89`) instead of the vendor's 40 ms, and enters monitor 1 s after the last
+  contact. The first contact still switches it to active mode at 12 ms.
+* `panel_sleep = true`: the panel gets `0x10` while off. On wake the driver
+  paints the whole GRAM black in 8-line DMA chunks before `0x29`, so the
+  undefined GRAM can never show as a white band.
 
 ## States
 

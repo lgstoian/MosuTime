@@ -40,6 +40,7 @@ static esp_lcd_panel_io_handle_t s_io;
 static esp_lcd_touch_handle_t s_touch;
 static lv_display_t *s_display;
 static bool s_display_on;
+static bool s_panel_sleep;
 static uint8_t s_brightness;
 
 /* Vendor initialisation sequence for this panel revision. */
@@ -202,6 +203,16 @@ esp_err_t mosu_board_display_start(void)
 
     ESP_RETURN_ON_ERROR(touch_create(), TAG, "touch");
 
+    /* A slower monitor scan is the cheapest touch idle current there is: the
+     * controller spends most of the night scanning for the first contact.
+     * The vendor driver initialises the controller asynchronously, so give it
+     * a moment before changing its registers. */
+    vTaskDelay(pdMS_TO_TICKS(200));
+    esp_err_t tune = mosu_board_touch_tune(80, 1);
+    if (tune != ESP_OK) {
+        ESP_LOGW(TAG, "touch tuning failed: %s", esp_err_to_name(tune));
+    }
+
     const lvgl_port_touch_cfg_t touch_cfg = {
         .disp = s_display,
         .handle = s_touch,
@@ -241,6 +252,28 @@ esp_err_t mosu_board_brightness_set(uint8_t percent)
     return esp_lcd_panel_io_tx_param(s_io, (int)cmd, &value, 1);
 }
 
+/* Raw panel command, using the same opcode packing as the brightness call. */
+static esp_err_t panel_cmd(uint8_t op)
+{
+    uint32_t cmd = ((uint32_t)op << 8) | ((uint32_t)LCD_OPCODE_WRITE_CMD << 24);
+    return esp_lcd_panel_io_tx_param(s_io, (int)cmd, NULL, 0);
+}
+
+/* Paint the GRAM black in small DMA chunks: 410x502x2 bytes is 411 KB, too
+ * much to allocate whole, and the panel is already off so this is invisible. */
+static void panel_fill_black(void)
+{
+    static uint16_t line[MOSU_LCD_H_RES * 8];
+    for (int y = 0; y < MOSU_LCD_V_RES; y += 8) {
+        int h = MOSU_LCD_V_RES - y;
+        if (h > 8) {
+            h = 8;
+        }
+        esp_lcd_panel_draw_bitmap(s_panel, 0, y, MOSU_LCD_H_RES, y + h, line);
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+}
+
 esp_err_t mosu_board_display_on(void)
 {
     if (!s_panel) {
@@ -249,9 +282,28 @@ esp_err_t mosu_board_display_on(void)
     if (s_display_on) {
         return ESP_OK;
     }
+    if (s_panel_sleep) {
+        /* Sleep-in loses the GRAM.  Wake the panel with the display still
+         * off, paint the whole frame black, and only then switch it on: the
+         * wearer sees black for a frame, never the undefined pixels that
+         * caused the white band in v1.1.0. */
+        ESP_RETURN_ON_ERROR(panel_cmd(0x11), TAG, "sleep out");
+        vTaskDelay(pdMS_TO_TICKS(120));
+        panel_fill_black();
+    }
     ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(s_panel, true), TAG, "on");
     s_display_on = true;
     return ESP_OK;
+}
+
+void mosu_board_display_set_panel_sleep(bool on)
+{
+    s_panel_sleep = on;
+}
+
+bool mosu_board_display_panel_sleep(void)
+{
+    return s_panel_sleep;
 }
 
 esp_err_t mosu_board_display_off(void)
@@ -265,6 +317,14 @@ esp_err_t mosu_board_display_off(void)
     /* Dim first so the panel does not flash while switching off. */
     mosu_board_brightness_set(0);
     ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(s_panel, false), TAG, "off");
+    if (s_panel_sleep) {
+        /* The vendor sequence needs the display off before sleep-in.  The
+         * GRAM is repainted black on the next wake, before display-on. */
+        esp_err_t err = panel_cmd(0x10);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "panel sleep in: %s", esp_err_to_name(err));
+        }
+    }
     s_display_on = false;
     return ESP_OK;
 }
@@ -285,6 +345,7 @@ void mosu_board_display_info(mosu_board_display_info_t *out)
     out->height = MOSU_LCD_V_RES;
     out->brightness = s_brightness;
     out->on = s_display_on;
+    out->panel_sleep = s_panel_sleep;
     /* These come from the fixed configuration above, not from the driver:
      * lvgl_port does not expose its buffer allocation back to us. */
     out->draw_buffer_pixels = MOSU_LCD_H_RES * DISP_BUF_LINES;

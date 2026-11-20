@@ -395,7 +395,7 @@ static void handle_line(char *line)
     if (!strcmp(line, "help") || !strcmp(line, "?")) {
         printf("commands:\n");
         printf("  status stats [reset] time sync say settime bright vol tap reboot version\n");
-        printf("  i2c pmu rtc imu motion [s] pm heap tasks display config mem\n");
+        printf("  i2c pmu rtc imu touch motion [s] pm heap tasks display config mem\n");
         printf("  pmu rail <name> on|off   (dcdc1..5, aldo1..4, bldo1..2,\n");
         printf("                            dldo1..2, cpusldo)\n");
         printf("  test screen [colors|grid|corners|off] | scene clock|blank\n");
@@ -403,8 +403,8 @@ static void handle_line(char *line)
         printf("  sd format yes | receive <path> <size> [/crc] | md <path>\n");
         printf("  ls [path] | rm <path> | rx bench <bytes>\n");
         printf("  wifi <ssid> <password> | scan | presence | clear | status\n");
-        printf("  screenshot [path] | power screen on|off | power wifi |\n");
-        printf("  power idle | poweroff | nvs erase\n");
+        printf("  screenshot [path] | power screen on|off | power panel on|off |\n");
+        printf("  power wifi | power idle | poweroff | nvs erase\n");
     } else if (!strncmp(line, "receive ", 8)) {
         char path[128];
         unsigned long size = 0;
@@ -459,6 +459,11 @@ static void handle_line(char *line)
                chip.revision / 100, chip.revision % 100, chip.cores);
     } else if (!strcmp(line, "stats")) {
         mosu_diag_stats_t stats;
+        if (!s_cfg->device.stats) {
+            printf("stats : disabled (set stats = true in mosu.cfg, then "
+                   "reboot)\n");
+            return;
+        }
         if (!s_hooks.stats) {
             printf("stats: no hook\n");
             return;
@@ -491,6 +496,11 @@ static void handle_line(char *line)
                    used, hours, ma);
         }
     } else if (!strcmp(line, "stats reset")) {
+        if (!s_cfg->device.stats) {
+            printf("stats : disabled (set stats = true in mosu.cfg, then "
+                   "reboot)\n");
+            return;
+        }
         if (!s_hooks.stats_reset) {
             printf("stats: no hook\n");
             return;
@@ -584,6 +594,20 @@ static void handle_line(char *line)
         mosu_board_rtc_dump();
     } else if (!strcmp(line, "imu")) {
         mosu_board_imu_dump();
+    } else if (!strcmp(line, "touch")) {
+        mosu_board_touch_dump();
+    } else if (!strncmp(line, "touch rate ", 11)) {
+        unsigned monitor = 0;
+        unsigned enter = 0;
+        if (sscanf(line + 11, "%u %u", &monitor, &enter) == 2) {
+            esp_err_t err = mosu_board_touch_tune((uint8_t)monitor,
+                                                  (uint8_t)enter);
+            printf("touch: tune %u ms / %u s: %s\n", monitor, enter,
+                   esp_err_to_name(err));
+            mosu_board_touch_dump();
+        } else {
+            printf("usage: touch rate <monitor ms> <enter s>\n");
+        }
     } else if (!strcmp(line, "motion") || !strncmp(line, "motion ", 7)) {
         int seconds = 10;
         if (strlen(line) > 7) {
@@ -633,10 +657,12 @@ static void handle_line(char *line)
     } else if (!strcmp(line, "display")) {
         mosu_board_display_info_t info;
         mosu_board_display_info(&info);
-        printf("display: %ldx%ld, %s, panel brightness %u%%, configured %u%%\n",
+        printf("display: %ldx%ld, %s, panel brightness %u%%, configured %u%%, "
+               "panel sleep %s\n",
                (long)info.width, (long)info.height, info.on ? "on" : "off",
                (unsigned)info.brightness,
-               s_cfg ? (unsigned)s_cfg->display.brightness : 0u);
+               s_cfg ? (unsigned)s_cfg->display.brightness : 0u,
+               info.panel_sleep ? "on" : "off");
         printf("  buffer: %lu px, double %d, dma %d, spiram %d\n",
                (unsigned long)info.draw_buffer_pixels, info.double_buffer,
                info.buffer_dma, info.buffer_spiram);
@@ -783,6 +809,11 @@ static void handle_line(char *line)
         }
         s_hooks.screen_off();
         printf("screen off\n");
+    } else if (!strcmp(line, "power panel on") ||
+               !strcmp(line, "power panel off")) {
+        const bool on = !strcmp(line, "power panel on");
+        mosu_board_display_set_panel_sleep(on);
+        printf("panel: sleep-in %s (next screen off)\n", on ? "on" : "off");
     } else if (!strcmp(line, "power wifi")) {
         if (!s_hooks.power_wifi) {
             printf("no wifi power hook\n");
@@ -837,7 +868,18 @@ static void diag_task(void *arg)
 
     for (;;) {
         char ch = 0;
-        if (read(STDIN_FILENO, &ch, 1) != 1) {
+        ssize_t got = -1;
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+        if (s_usj_ready) {
+            /* Block until the host sends something.  Polling the VFS every
+             * 200 ms kept a wake-up running for a console nobody was using. */
+            got = usb_serial_jtag_read_bytes(&ch, 1, portMAX_DELAY);
+        } else
+#endif
+        {
+            got = read(STDIN_FILENO, &ch, 1);
+        }
+        if (got != 1) {
             vTaskDelay(pdMS_TO_TICKS(200));
             continue;
         }

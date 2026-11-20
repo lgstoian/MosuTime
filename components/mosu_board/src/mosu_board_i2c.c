@@ -201,10 +201,10 @@ esp_err_t mosu_board_pmu_init(void)
         return err;
     }
 
-    /* Enable VBAT / VBUS / VSYS ADCs, disable the TS pin measurement.
-     * The board has no battery thermistor; leaving TS enabled breaks
-     * charging. */
-    ESP_RETURN_ON_ERROR(pmu_update(0x30, 0x0F, 0x0D), TAG, "pmu adc");
+    /* VBAT ADC only: the fuel estimate needs it, and VBUS presence comes from
+     * the status bits.  The unused VBUS/VSYS channels and the TS pin stay off;
+     * every enabled ADC is a little quiescent current on a 400 mAh cell. */
+    ESP_RETURN_ON_ERROR(pmu_update(0x30, 0x0F, 0x01), TAG, "pmu adc");
     /* TS pin control: external fixed input, no NTC.  Clearing the ADC
      * channel alone is not enough; the charger still looks at the TS pin
      * configuration unless 0x50 selects the fixed-input mode (bit 4). */
@@ -415,8 +415,87 @@ bool mosu_board_rtc_valid(void)
     return true;
 }
 
-/* ------------------------------------------------------------------ IMU */
+/* ------------------------------------------------------------------ touch */
 
+/* The FT3168 has three modes: active (12 ms period), monitor (a slow scan
+ * that looks for the first contact) and sleep.  The vendor driver leaves the
+ * monitor period at 40 ms, which is 25 scans a second, all through the night,
+ * for a screen nobody is touching.  A double tap is two contacts of roughly
+ * 100 ms each, so 80 ms still catches the first one with a worst-case 80 ms
+ * latency; the controller switches to active mode as soon as it does. */
+#define FT3168_ADDR 0x38
+#define FT_REG_PERIOD_MONITOR 0x89
+#define FT_REG_ENTER_MONITOR 0x87
+
+static i2c_master_dev_handle_t s_touch;
+
+esp_err_t mosu_board_touch_tune(uint8_t monitor_ms, uint8_t enter_monitor_s)
+{
+    if (!monitor_ms) {
+        monitor_ms = 100;
+    }
+    if (!enter_monitor_s) {
+        enter_monitor_s = 5;
+    }
+    if (!s_touch) {
+        esp_err_t add = bus_add(FT3168_ADDR, &s_touch);
+        if (add != ESP_OK) {
+            return add;
+        }
+    }
+    /* The controller is still settling right after its reset and while it
+     * scans; give it a moment and retry a NAK. */
+    vTaskDelay(pdMS_TO_TICKS(50));
+    esp_err_t err = ESP_FAIL;
+    for (int attempt = 0; attempt < 5; attempt++) {
+        err = reg_write_u8(s_touch, FT_REG_ENTER_MONITOR, enter_monitor_s);
+        if (err == ESP_OK) {
+            err = reg_write_u8(s_touch, FT_REG_PERIOD_MONITOR, monitor_ms);
+        }
+        if (err == ESP_OK) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+    if (err != ESP_OK) {
+        return err;
+    }
+    vTaskDelay(pdMS_TO_TICKS(50));
+    ESP_LOGI(TAG, "touch: monitor every %u ms, after %u s",
+             (unsigned)monitor_ms, (unsigned)enter_monitor_s);
+    return ESP_OK;
+}
+
+void mosu_board_touch_dump(void)
+{
+    if (!s_touch) {
+        printf("touch: not initialised\n");
+        return;
+    }
+    uint8_t monitor = 0;
+    uint8_t enter = 0;
+    esp_err_t err = ESP_FAIL;
+    for (int attempt = 0; attempt < 3; attempt++) {
+        err = reg_read(s_touch, FT_REG_PERIOD_MONITOR, &monitor, 1);
+        if (err == ESP_OK) {
+            err = reg_read(s_touch, FT_REG_ENTER_MONITOR, &enter, 1);
+        }
+        if (err == ESP_OK) {
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    if (err != ESP_OK) {
+        printf("touch: register read failed (%s)\n", esp_err_to_name(err));
+        return;
+    }
+    printf("touch: monitor %u ms, enter after %u s, INT %s\n",
+           (unsigned)monitor, (unsigned)enter,
+           gpio_get_level(MOSU_PIN_TOUCH_INT) == 0 ? "low (touched)"
+                                                   : "high (idle)");
+}
+
+/* ------------------------------------------------------------------ IMU */
 static uint16_t s_imu_lsb_div = 8192; /* +-4 g */
 
 esp_err_t mosu_board_imu_init(void)
@@ -549,7 +628,7 @@ void mosu_board_pmu_dump(void)
      * current, termination current and CV target.  Printing them makes the
      * battery bring-up check possible without a vendor tool. */
     static const uint8_t charge_regs[] = {
-        0x27, 0x49, 0x50, 0x61, 0x62, 0x63, 0x64, 0x80, 0x90, 0x91,
+        0x27, 0x30, 0x49, 0x50, 0x61, 0x62, 0x63, 0x64, 0x80, 0x90, 0x91,
     };
     for (size_t i = 0; i < sizeof(charge_regs) / sizeof(charge_regs[0]); i++) {
         uint8_t value = 0;

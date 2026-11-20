@@ -49,6 +49,8 @@ changed to make the emulator work.
 | 30 | Half a white screen and a freeze when the face woke | yes | done: 100 forced off/on cycles |
 | 31 | Lift-to-wake only responded to a hard shake | yes | logic + host simulation; wrist test pending |
 | 32 | AXP2101 left eight unused rails enabled | yes: rail dump | done: rails off, I2C/SD/audio still pass |
+| 33 | Background logs and polling kept a task awake | yes | done: quiet profile, 100 panel cycles |
+| 34 | Panel sleep-in loses the GRAM and can flash white | yes: 100 cycles | done: black fill before display-on |
 
 ## 1. SD mount blocking boot
 
@@ -885,6 +887,57 @@ a wrong assumption can be undone at the console without a rebuild.
 **Verification.** After the change: I2C scan still finds 7 devices, the IMU
 reads, the SD card mounts, a 410x502 screenshot is written to it and the audio
 test plays. Current saving is not measured yet; see `docs/power.md`.
+
+## 33. Background logs and polling kept the CPU busy for nothing
+
+**Symptom.** No visible failure, but the watch was harder to keep asleep than
+the design implied, and a failed sync could stall for a moment.
+
+**Cause.** Three small things added up. The log level defaulted to INFO, so
+every wake and sync wrote lines to USB-Serial/JTAG; when no host is draining
+the port, those writes block until the driver's buffer has room. The console
+task polled `read(STDIN_FILENO)` every 200 ms even with no host. The network
+task woke every 60 s to look at the clock, and the RTC was read ten times a
+second while the face was on even though the minute had not changed.
+
+**Fix.** The default log level is `error` (set in Kconfig and again at the top
+of `app_main`), so a production watch is silent unless something fails; the
+level remains a `mosu.cfg` setting. The console blocks on the USB driver
+instead of polling; the network task sleeps until the next scheduled sync or
+presence scan; the RTC is read once a second while the face is on. The power
+counters have a `stats = true|false` switch (default off; the console says
+`stats : disabled`).
+
+**Fix lives in.**
+[`main/app_main.c`](../main/app_main.c),
+[`components/mosu_diag/src/mosu_diag.c`](../components/mosu_diag/src/mosu_diag.c),
+[`components/mosu_net/src/mosu_net.c`](../components/mosu_net/src/mosu_net.c),
+[`components/mosu_config/src/mosu_config.c`](../components/mosu_config/src/mosu_config.c).
+
+**Verification.** Boot is quiet apart from the console banner; `stats` reports
+the switch; the host suite still passes and the watch runs normally.
+
+## 34. Sleep-in loses the GRAM, so wake paints it black first
+
+**Symptom.** None yet, by design: panel sleep-in was reverted in v1.1.1 because
+waking it showed the undefined GRAM (the white third).
+
+**Cause.** `0x10` removes power from the panel's DC-DC and the GRAM contents are
+undefined on the next `0x11`.
+
+**Fix.** Sleep-in is back, behind `display.panel_sleep` (on in the shipped
+config). On wake the display stays off while the driver sends `0x11`, waits
+120 ms, and writes a full black frame to the GRAM in 8-line DMA chunks; only
+then does it send `0x29` and restore brightness. The wearer sees black for
+about one frame, never an undefined pixel. If a future panel revision still
+flashes, set `panel_sleep = false` in `mosu.cfg`.
+
+**Fix lives in.**
+[`components/mosu_board/src/mosu_board_display.c`](../components/mosu_board/src/mosu_board_display.c).
+
+**Verification.** 130 forced off/on cycles with sleep-in enabled, no hang, and
+a complete 410x502 screenshot afterwards. The absence of a white flash is a
+visual check for the wearer.
 
 ## Adding a finding
 

@@ -31,6 +31,7 @@ typedef struct {
 typedef struct {
     char name[MOSU_CFG_NAME_MAX];
     uint8_t log_level; /* 0 none .. 5 verbose */
+    bool stats;        /* background power accounting and `stats` */
 } mosu_device_cfg_t;
 
 typedef struct {
@@ -43,6 +44,7 @@ typedef struct {
     uint8_t motion_poll_hz;        /* accelerometer poll rate while asleep */
     uint16_t pixel_shift_sec;      /* 0 = disabled, AMOLED burn-in guard */
     uint16_t tap_feedback_ms;      /* 0 = no border flash */
+    bool panel_sleep;              /* panel 0x10 while off (loses GRAM) */
 } mosu_display_cfg_t;
 
 typedef struct {

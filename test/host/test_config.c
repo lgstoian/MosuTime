@@ -67,7 +67,7 @@ static void test_shipped_config(void)
     EXPECT(report.applied > 40);
     EXPECT_STR(cfg.device.name, "MosuTime");
     EXPECT(cfg.display.brightness == 55);
-    EXPECT(cfg.display.screen_on_ms == 15000);
+    EXPECT(cfg.display.screen_on_ms == 11250);
     EXPECT_STR(cfg.clock.timezone, "Europe/Bucharest");
     EXPECT(cfg.clock.sync_hours == 6);
     EXPECT(cfg.clock.sync_per_day == 0);
