@@ -472,24 +472,23 @@ static void net_task(void *arg)
 
             uint32_t wait =
                 mosu_policy_next_sync_s(fail_count, sync_interval_s());
-            s_next_sync_s = uptime_s() + wait;
 
             if (ok) {
                 s_next_presence_s = 0;
             } else {
-                /* If no access point answered at all, look for a configured
-                 * SSID again.  The interval follows what this local hour
-                 * usually looks like: 15 minutes when the watch is normally
-                 * home at this hour, up to 4 hours when it never is.  When
-                 * the owner comes home and the radio sees the AP, sync
-                 * immediately instead of waiting for the full backoff.  An
-                 * auth failure means the AP is visible: keep the normal,
-                 * slower backoff so a wrong password cannot spin the radio. */
-                bool no_ap = s_last_reason == 0 ||
-                             s_last_reason == WIFI_REASON_NO_AP_FOUND;
+                /* A failed sync never needs a five-minute retry.  Whether the
+                 * AP is absent or the password is wrong, wait for the learned
+                 * presence interval (1 h at first, then longer as this hour
+                 * keeps failing, up to 6 h).  When the owner comes home and
+                 * the radio sees the AP, sync immediately. */
+                const uint32_t scan = mosu_wifi_learn_scan_s(&learn, hour);
+                if (scan > wait) {
+                    wait = scan;
+                }
+                const bool no_ap = s_last_reason == 0 ||
+                                   s_last_reason == WIFI_REASON_NO_AP_FOUND;
                 if (!s_last_connected && no_ap && s_cfg->wifi_count > 0 &&
                     !s_cfg->clock.wifi_always_on) {
-                    uint32_t scan = mosu_wifi_learn_scan_s(&learn, hour);
                     s_next_presence_s = uptime_s() + scan;
                     ESP_LOGI(TAG, "presence scan in %u min (hour %u score %u)",
                              (unsigned)(scan / 60u), (unsigned)hour,
@@ -500,6 +499,7 @@ static void net_task(void *arg)
                 ESP_LOGW(TAG, "sync failed (%u in a row), next try in %u s",
                          (unsigned)fail_count, (unsigned)wait);
             }
+            s_next_sync_s = uptime_s() + wait;
         }
 
         if (s_next_presence_s != 0 &&

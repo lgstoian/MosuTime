@@ -133,6 +133,14 @@ mosu_batt_bucket_t mosu_session_battery_bucket(const mosu_session_t *session);
 mosu_session_wifi_t
 mosu_session_wifi_icon(mosu_session_net_state_t net_state, bool have_sync);
 
+/*
+ * Map the age of the last successful sync to the icon.  A failed attempt
+ * must not repaint it: green until the clock is one and a half intervals old,
+ * red only when it is genuinely stale, grey when it never synced.
+ */
+mosu_session_wifi_t mosu_session_wifi_from_age(uint32_t age_s,
+                                               uint32_t interval_s);
+
 #ifdef __cplusplus
 }
 #endif

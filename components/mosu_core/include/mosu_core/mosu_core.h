@@ -155,6 +155,8 @@ typedef struct {
     bool have_event;
     uint32_t candidate_ms;
     uint32_t last_event_ms;
+    uint32_t still_ms;     /* time spent settled near the baseline */
+    uint32_t last_ms;      /* previous sample time, 0 before the first */
 } mosu_wrist_t;
 
 void mosu_wrist_init(mosu_wrist_t *wrist);

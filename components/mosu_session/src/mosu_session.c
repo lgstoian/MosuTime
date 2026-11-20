@@ -269,3 +269,23 @@ mosu_session_wifi_icon(mosu_session_net_state_t net_state, bool have_sync)
     }
     return MOSU_SESSION_WIFI_IDLE;
 }
+
+mosu_session_wifi_t mosu_session_wifi_from_age(uint32_t age_s,
+                                               uint32_t interval_s)
+{
+    if (age_s == UINT32_MAX) {
+        return MOSU_SESSION_WIFI_IDLE;
+    }
+    if (interval_s < 3600u) {
+        interval_s = 3600u;
+    }
+    if (interval_s > 168u * 3600u) {
+        interval_s = 168u * 3600u;
+    }
+    /* One and a half intervals: a single missed attempt, or a slow retry,
+     * keeps the icon green because the clock is still good. */
+    if (age_s <= interval_s + interval_s / 2u) {
+        return MOSU_SESSION_WIFI_OK;
+    }
+    return MOSU_SESSION_WIFI_FAIL;
+}

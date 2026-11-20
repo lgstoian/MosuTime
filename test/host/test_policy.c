@@ -204,7 +204,7 @@ static void test_wifi_learn(void)
     mosu_wifi_learn_init(&learn);
 
     EXPECT(mosu_wifi_learn_score(&learn, 9) == 128);
-    EXPECT(mosu_wifi_learn_scan_s(&learn, 9) == 30 * 60);
+    EXPECT(mosu_wifi_learn_scan_s(&learn, 9) == 60 * 60);
 
     mosu_wifi_learn_note(&learn, 9, true);
     EXPECT(mosu_wifi_learn_score(&learn, 9) > 128);
@@ -217,12 +217,12 @@ static void test_wifi_learn(void)
         mosu_wifi_learn_note(&learn, 3, false);
     }
     EXPECT(mosu_wifi_learn_score(&learn, 3) < 24);
-    EXPECT(mosu_wifi_learn_scan_s(&learn, 3) == 4 * 60 * 60);
+    EXPECT(mosu_wifi_learn_scan_s(&learn, 3) == 6 * 60 * 60);
 
     /* An invalid hour is ignored, not written out of bounds. */
     mosu_wifi_learn_note(&learn, 24, true);
     EXPECT(mosu_wifi_learn_score(&learn, 24) == 128);
-    EXPECT(mosu_wifi_learn_scan_s(&learn, 24) == 30 * 60);
+    EXPECT(mosu_wifi_learn_scan_s(&learn, 24) == 60 * 60);
 }
 
 static void test_power_learn(void)

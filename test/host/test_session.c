@@ -295,6 +295,28 @@ static void test_wifi_icon(void)
            MOSU_SESSION_WIFI_IDLE);
 }
 
+static void test_wifi_age_icon(void)
+{
+    const uint32_t six_hours = 6u * 3600u;
+
+    EXPECT(mosu_session_wifi_from_age(UINT32_MAX, six_hours) ==
+           MOSU_SESSION_WIFI_IDLE);
+    EXPECT(mosu_session_wifi_from_age(0, six_hours) == MOSU_SESSION_WIFI_OK);
+    EXPECT(mosu_session_wifi_from_age(6 * 3600, six_hours) ==
+           MOSU_SESSION_WIFI_OK);
+
+    /* A missed attempt or a retry does not turn the icon red... */
+    EXPECT(mosu_session_wifi_from_age(9 * 3600, six_hours) ==
+           MOSU_SESSION_WIFI_OK);
+    /* ...only a clock that is genuinely stale does. */
+    EXPECT(mosu_session_wifi_from_age(9 * 3600 + 1, six_hours) ==
+           MOSU_SESSION_WIFI_FAIL);
+
+    /* A bad interval is clamped instead of making the icon flicker. */
+    EXPECT(mosu_session_wifi_from_age(100, 0) == MOSU_SESSION_WIFI_OK);
+    EXPECT(mosu_session_wifi_from_age(200000, 0) == MOSU_SESSION_WIFI_FAIL);
+}
+
 void test_session(void)
 {
     test_screen_timing();
@@ -307,4 +329,5 @@ void test_session(void)
     test_battery_smoothing();
     test_battery_bucket_edges();
     test_wifi_icon();
+    test_wifi_age_icon();
 }

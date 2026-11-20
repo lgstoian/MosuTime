@@ -399,15 +399,15 @@ uint32_t mosu_wifi_learn_scan_s(const mosu_wifi_learn_t *learn, uint8_t hour)
         return 15u * 60u;
     }
     if (score >= 96) {
-        return 30u * 60u;
-    }
-    if (score >= 48) {
         return 60u * 60u;
     }
-    if (score >= 24) {
+    if (score >= 48) {
         return 120u * 60u;
     }
-    return 240u * 60u;
+    if (score >= 24) {
+        return 240u * 60u;
+    }
+    return 360u * 60u;
 }
 
 void mosu_power_learn_init(mosu_power_learn_t *learn)

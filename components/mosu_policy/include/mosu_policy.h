@@ -102,7 +102,7 @@ void mosu_wifi_learn_init(mosu_wifi_learn_t *learn);
 void mosu_wifi_learn_note(mosu_wifi_learn_t *learn, uint8_t hour, bool ok);
 uint8_t mosu_wifi_learn_score(const mosu_wifi_learn_t *learn, uint8_t hour);
 /* Seconds between presence scans for this hour: 15 min when the hour is
- * usually online, up to 4 h when it is almost never online. */
+ * usually online, 1-6 h when it is rarely or never online. */
 uint32_t mosu_wifi_learn_scan_s(const mosu_wifi_learn_t *learn, uint8_t hour);
 
 /*

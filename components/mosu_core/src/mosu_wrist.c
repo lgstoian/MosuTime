@@ -13,9 +13,11 @@
 
 #include "mosu_core/mosu_core.h"
 
-#define MOSU_WRIST_HOLD_MS 300
+#define MOSU_WRIST_HOLD_MS 400
 #define MOSU_WRIST_HOLD_DEG 20.0f
 #define MOSU_WRIST_STILL_DEG 12.0f
+#define MOSU_WRIST_STILL_BEFORE_MS 1500
+#define MOSU_WRIST_FACE_UP_MIN 0.45f
 #define MOSU_WRIST_BASELINE_ALPHA 0.05f
 #define MOSU_RAD_TO_DEG 57.2957795f
 
@@ -35,6 +37,8 @@ void mosu_wrist_reset(mosu_wrist_t *wrist)
     wrist->have_baseline = false;
     wrist->have_candidate = false;
     wrist->candidate_ms = 0;
+    wrist->still_ms = 0;
+    wrist->last_ms = 0;
 }
 
 static float angle_between(float ax, float ay, float az, float bx, float by,
@@ -71,7 +75,14 @@ bool mosu_wrist_update(mosu_wrist_t *wrist, const mosu_accel_t *accel,
         wrist->by = ny;
         wrist->bz = nz;
         wrist->have_baseline = true;
+        wrist->last_ms = now_ms;
         return false;
+    }
+
+    uint32_t dt = wrist->last_ms ? (uint32_t)(now_ms - wrist->last_ms) : 0;
+    wrist->last_ms = now_ms;
+    if (dt > 1000u) {
+        dt = 1000u;
     }
 
     if ((int32_t)(now_ms - wrist->last_event_ms) <
@@ -87,8 +98,21 @@ bool mosu_wrist_update(mosu_wrist_t *wrist, const mosu_accel_t *accel,
     float from_baseline =
         angle_between(nx, ny, nz, wrist->bx, wrist->by, wrist->bz);
 
+    /* A raise starts from a still arm.  Remember how long the watch has been
+     * settled before this sample; a movement that begins while the arm is
+     * already moving is a gesture, not a glance at the time. */
+    const uint32_t still_before = wrist->still_ms;
+    if (from_baseline < MOSU_WRIST_STILL_DEG) {
+        wrist->still_ms = wrist->still_ms + dt > 60000u
+                              ? 60000u
+                              : wrist->still_ms + dt;
+    } else {
+        wrist->still_ms = 0;
+    }
+
     if (!wrist->have_candidate) {
-        if (!refractory && from_baseline >= threshold) {
+        if (!refractory && from_baseline >= threshold &&
+            still_before >= MOSU_WRIST_STILL_BEFORE_MS) {
             wrist->have_candidate = true;
             wrist->cx = nx;
             wrist->cy = ny;
@@ -114,8 +138,12 @@ bool mosu_wrist_update(mosu_wrist_t *wrist, const mosu_accel_t *accel,
         angle_between(nx, ny, nz, wrist->cx, wrist->cy, wrist->cz);
 
     if (from_candidate <= MOSU_WRIST_HOLD_DEG) {
+        /* Looking at the watch means the glass turns towards the wearer: the
+         * gravity vector ends up along the screen normal.  Reaching for an
+         * object can rotate the wrist just as far but keeps the face
+         * vertical, so this is what separates a glance from a gesture. */
         if ((uint32_t)(now_ms - wrist->candidate_ms) >= MOSU_WRIST_HOLD_MS &&
-            !refractory) {
+            !refractory && fabsf(nz) >= MOSU_WRIST_FACE_UP_MIN) {
             /* The new orientation held: this is a raise. */
             wrist->bx = wrist->cx;
             wrist->by = wrist->cy;
@@ -123,6 +151,7 @@ bool mosu_wrist_update(mosu_wrist_t *wrist, const mosu_accel_t *accel,
             wrist->have_candidate = false;
             wrist->last_event_ms = now_ms;
             wrist->have_event = true;
+            wrist->still_ms = 0;
             return true;
         }
         return false;

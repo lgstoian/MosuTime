@@ -21,7 +21,6 @@ void mosu_time_now(struct tm *out);
 
 /* False until the clock has a believable date (RTC, manual or SNTP). */
 bool mosu_time_valid(void);
-
 /* Apply an SNTP result.  Also writes the RTC, in UTC. */
 esp_err_t mosu_time_set_epoch(time_t utc);
 

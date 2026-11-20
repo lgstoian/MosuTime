@@ -169,34 +169,52 @@ static void test_tap(void)
 
 static void test_wrist(void)
 {
-    mosu_wrist_cfg_t cfg = {.angle_mdeg = 35000, .refractory_ms = 2500};
+    mosu_wrist_cfg_t cfg = {.angle_mdeg = 60000, .refractory_ms = 2500};
     mosu_wrist_t wrist;
     mosu_wrist_init(&wrist);
 
-    mosu_accel_t down = {0.0f, 0.0f, 1.0f};
-    mosu_accel_t up = {1.0f, 0.0f, 0.0f};
+    mosu_accel_t down = {0.0f, 1.0f, 0.0f};   /* arm down, glass vertical */
+    mosu_accel_t up = {0.0f, 0.0f, 1.0f};     /* glass towards the wearer */
 
+    /* Settle for longer than the still-before window, then raise. */
     EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 1000));
-    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 1100));
-    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 1300));
-    EXPECT(mosu_wrist_update(&wrist, &up, &cfg, 1450));
+    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 1300));
+    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 1600));
+    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 1900));
+    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 2200));
+    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 2500));
+    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 2800));
+
+    /* The new orientation has to hold for the full 400 ms. */
+    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 2900));
+    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 3200));
+    EXPECT(mosu_wrist_update(&wrist, &up, &cfg, 3400));
 
     /* Holding the new orientation does not retrigger. */
-    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 2000));
-    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 5000));
+    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 4200));
+    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 9000));
+
+    /* A raise that starts while the arm is still moving is ignored. */
+    mosu_wrist_init(&wrist);
+    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 1000));
+    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 1100));
+    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 1600));
 
     /* Small wobble around the baseline is ignored. */
     mosu_wrist_init(&wrist);
     EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 1000));
-    mosu_accel_t wobble = {0.1f, 0.0f, 0.99f};
-    EXPECT(!mosu_wrist_update(&wrist, &wobble, &cfg, 1100));
+    mosu_accel_t wobble = {0.1f, 0.99f, 0.0f};
     EXPECT(!mosu_wrist_update(&wrist, &wobble, &cfg, 1300));
+    EXPECT(!mosu_wrist_update(&wrist, &wobble, &cfg, 1600));
 
-    /* Lowering the arm is also a large change: it must respect refractory. */
-    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 2000));
-    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 2200));
-    EXPECT(mosu_wrist_update(&wrist, &up, &cfg, 2350));
+    /* Lowering the arm after a real raise respects the refractory. */
+    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 1900));
+    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 2200));
     EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 2500));
+    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 2800));
+    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 2900));
+    EXPECT(mosu_wrist_update(&wrist, &up, &cfg, 3400));
+    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 3600));
 }
 
 static void test_config(void)

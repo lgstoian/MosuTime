@@ -188,11 +188,12 @@ static void update_battery(bool immediate)
 
 static void update_wifi_icon(void)
 {
-    mosu_net_status_t status;
-    mosu_net_status(&status);
-
-    mosu_ui_set_wifi((mosu_ui_wifi_t)mosu_session_wifi_icon(
-        (mosu_session_net_state_t)status.state, status.have_sync));
+    const uint32_t interval =
+        s_cfg.clock.sync_per_day > 0
+            ? 86400u / s_cfg.clock.sync_per_day
+            : (uint32_t)s_cfg.clock.sync_hours * 3600u;
+    mosu_ui_set_wifi((mosu_ui_wifi_t)mosu_session_wifi_from_age(
+        mosu_time_sync_age_s(), interval));
 }
 
 static void screen_on(bool via_touch)
@@ -225,6 +226,9 @@ static void screen_on(bool via_touch)
             s_lvgl_stopped = false;
         }
         mosu_ui_render_now();
+        /* lv_refr_now queues the QSPI flush; switching the display on before
+         * the transfer finishes is what showed half a white frame. */
+        vTaskDelay(pdMS_TO_TICKS(80));
     }
 
     if (s_display_ok) {
@@ -252,6 +256,9 @@ static void screen_off(void)
     if (s_have_ui) {
         lvgl_port_stop();
         s_lvgl_stopped = true;
+        /* Let an in-flight QSPI flush finish before the panel is switched
+         * off and put to sleep. */
+        vTaskDelay(pdMS_TO_TICKS(30));
     }
     if (s_display_ok) {
         mosu_board_display_off();
