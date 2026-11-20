@@ -279,7 +279,23 @@ A card formatted by a PC can fail with `failed to mount card (13)` even though
 Windows opens it. That is FatFs rejecting an incomplete FAT32 table, not a
 wiring fault: let the watch format it (`sd format yes`) and push again.
 
-## 7. Troubleshooting
+## 7. Turn the watch off
+
+The watch is meant to stay on. There are two ways to cut power:
+
+* **Hold the side PWR button for 10 seconds.** The AXP2101 does this itself,
+  so it works even if the firmware is hung. A short press, or a press that
+  slips, does nothing; this is deliberate, because the wearer must not switch
+  it off by accident. Press PWR briefly to power it on again.
+* **`poweroff` on the console** saves the clock to the RTC, turns the panel
+  off and asks the PMU to remove the rails. It works on USB as well as on the
+  cell (verified on this board), which makes it the safe maintenance shutdown.
+
+The PWRKEY off-time is set to 10 s at every boot (`AXP2101` register `0x27`,
+bits 3:2 = `11`; `pmu` prints it). Do not lower it for a wearer with dementia:
+4 s or 6 s is reachable by a fumbling press.
+
+## 8. Troubleshooting
 
 | Symptom | Check |
 | --- | --- |
@@ -295,6 +311,7 @@ wiring fault: let the watch format it (`sd format yes`) and push again.
 | `PUSH ... no ACK` or `input stalled` | The 4 KB chunk did not arrive intact; `push_sd.py` restarts that file automatically. If it repeats, run `rx bench 262144` and check the reported rate (400 KiB/s or more is healthy on USB Serial/JTAG). |
 | Battery percentage jumps | The percentage comes from battery voltage, not a coulomb counter. It moves in steps and is less accurate under load. Use a PPK2 for energy measurements. |
 | Watch will not charge | Cable, charger, battery connector. `status`/`pmu` show `charging` and `vbus`; a PMU that does not answer is a hardware fault. |
+| Watch will not turn off | Hold PWR for a full 10 s; a short press is ignored by design. `pmu` must show `0x27 = 0x1C`. If the rails are still up on USB, use `poweroff`. |
 | Screen stays black | Touch it once; the face is off by default. If it stays black, check the boot log for `display init failed`. |
 | Random resets | Check the log for `brownout`; suspect the battery, the connector or the charger. Do not ship it. |
 

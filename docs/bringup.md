@@ -409,10 +409,15 @@ Give the watch to the wearer only when every line is true.
       Europe/Bucharest, writes the RTC, turns the radio off, and fails
       gracefully with a wrong password. Presence scan was checked both ways;
       the 15-minute automatic trigger has not been timed.
-- [ ] Power: no battery, no PPK2; idle/24 h figures are still model estimates.
+- [x] Power: 402728 cell (3.7 V, 400 mAh) attached; `pmu` reads 4135-4179 mV
+      and `charging yes` on VBUS at 200 mA. PPK2 idle/light-sleep and the
+      24 h soak are still **not run**.
+- [x] Shutdown: a 3 s PWR hold does nothing; a full 10 s hold cuts power on the
+      cell, and a short press boots it again. `poweroff` on the console is
+      verified on USB; it cut the rails and PWR brought the watch back.
 - [ ] Mechanical: not checked in this session.
 - [ ] Recorded: board is ESP32-S3 rev v0.2, 8 MB PSRAM, 32 MB flash, MAC
-      `44:bd:8d:77:8a:60`; battery capacity and serial/label are pending.
+      `44:bd:8d:77:8a:60`; battery is a 402728 400 mAh; serial/label pending.
 
 If any box is unchecked, fix it and repeat the affected step. A conditional
 "go" is a no-go for this wearer.

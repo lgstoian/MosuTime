@@ -112,6 +112,10 @@ esp_err_t mosu_board_sdcard_dump_boot(void);
 
 esp_err_t mosu_board_pmu_read(mosu_board_pmu_t *out);
 
+/* Cut the system rails through the AXP2101.  On battery it does not return;
+ * with VBUS present the PMU may keep running to charge the cell. */
+esp_err_t mosu_board_pmu_power_off(void);
+
 esp_err_t mosu_board_rtc_init(void);
 esp_err_t mosu_board_rtc_read(struct tm *utc);
 esp_err_t mosu_board_rtc_write(const struct tm *utc);

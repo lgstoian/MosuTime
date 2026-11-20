@@ -28,7 +28,7 @@ Run it with no arguments:
 
 ```sh
 python tools/power_budget.py
-python tools/power_budget.py --capacity 300 --capacity 500
+python tools/power_budget.py --capacity 300 --capacity 400 --capacity 500
 ```
 
 The script reads `brightness`, `screen_on_ms`, `motion_poll_hz` and
@@ -43,7 +43,7 @@ again, so heavy use is overestimated rather than understated. The model also
 assumes every raise passes the angle and refractory filters; change `--raises`
 to the number that actually reaches the screen if you have measured it.
 
-With the shipped defaults (300 mAh, brightness 55, 15 s screen-on, 8 Hz IMU,
+With the shipped defaults (400 mAh, brightness 55, 15 s screen-on, 8 Hz IMU,
 6 h sync, 20 touch/boot wakes and 60 wrist raises per day, 8 announcements)
 the model gives:
 
@@ -56,11 +56,30 @@ the model gives:
 | Wi-Fi sync | 0.04 mA | 1% |
 | **Total** | **3.18 mA** | **100%** |
 
-That is about **3.9 days from 300 mAh** and **6.6 days from 500 mAh**, by the
-model only. The 2.1 mA floor comes from two assumptions: 0.6 mA in light sleep
-and 1.5 mA for the touch controller. If the measured floor is higher, the
-runtime drops proportionally; the touch controller is the first thing to
-measure.
+That is about **5.2 days from the fitted 400 mAh cell** (3.9 days from
+300 mAh and 6.6 days from 500 mAh), by the model only. The 2.1 mA floor comes
+from two assumptions: 0.6 mA in light sleep and 1.5 mA for the touch
+controller. If the measured floor is higher, the runtime drops proportionally;
+the touch controller is the first thing to measure.
+
+## Battery and charger
+
+The fitted cell is a 402728 pouch (4.0 x 27 x 28 mm), 3.7 V nominal,
+**400 mAh**, two wires with no thermistor. The AXP2101 profile is set in
+`mosu_board_i2c.c` and read back by `pmu`:
+
+| Setting | Register | Value | Meaning |
+| --- | --- | --- | --- |
+| Constant current | `0x62` | `0x08` | 200 mA (0.5 C) |
+| Target voltage | `0x64` | `0x03` | 4.2 V |
+| Termination | `0x63` | `0x01` | 25 mA (C/16) |
+| Precharge | `0x61` | `0x02` | 50 mA (0.125 C) |
+| TS pin | `0x50` | `0x10` | fixed input, no NTC |
+| PWRKEY off time | `0x27` | bits 3:2 = `11` | hold 10 s to cut power |
+
+0.5 C is the usual fast-charge ceiling for a small pouch cell and keeps the
+charge under about two hours from empty. Change `0x62` to `0x04` (100 mA,
+0.25 C) if the cell runs warm; do not exceed 1 C (400 mA, `0x10`).
 
 ### What dominates
 
@@ -252,7 +271,7 @@ default duty cycle still leaves margin, and so that a regression is visible.
 | Screen on, normal face at brightness 55 | <= 60 mA | The model uses 35 mA; the panel and CPU should not be far above it. |
 | Speaking | <= 200 mA | 120 mA modelled; the PA and SD card add peaks. |
 | Wi-Fi sync | <= 200 mA | 120 mA modelled; check the burst length separately. |
-| 24 h average at the default duty cycle | <= 4.2 mA | Gives >= 3.0 days at 300 mAh and >= 5.0 days at 500 mAh. |
+| 24 h average at the default duty cycle | <= 4.2 mA | Gives >= 5.2 days on the fitted 400 mAh cell; >= 3.0 days at 300 mAh. |
 | 24 h soak | no reset, no watchdog, no stuck screen | A power bug usually shows up as a reset or a panel left on. |
 
 `4.2 mA` is not a measured value and does not guarantee battery life. It is

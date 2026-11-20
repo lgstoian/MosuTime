@@ -48,6 +48,19 @@ Lăsați ceasul la încărcat până când bateria este plină. Un încărcător
 de telefon este bun. Nu folosiți un cablu rupt și nu încărcați ceasul lângă
 apă. Când bateria este plină, scoateți cablul.
 
+## Cum se oprește ceasul
+
+Ceasul stă aprins și arată ora; nu trebuie oprit. Dacă totuși trebuie să îl
+închideți de tot, țineți apăsat butonul lateral **zece secunde**. Butonul este
+mic, pe marginea ceasului, nu pe ecran. Țineți apăsat și numărați până la
+zece: ecranul se stinge abia la sfârșit.
+
+O apăsare scurtă nu îl oprește. Este intenționat, ca o atingere din greșeală
+să nu închidă ceasul.
+
+Pentru a-l porni din nou, apăsați scurt butonul lateral. Ceasul revine la oră
+în câteva secunde.
+
 ## Când apar liniuțe în loc de cifre
 
 Dacă vedeți liniuțe, ceasul nu știe încă ora. Nu este stricat. Așteptați să

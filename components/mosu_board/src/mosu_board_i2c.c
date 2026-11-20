@@ -137,15 +137,33 @@ esp_err_t mosu_board_pmu_init(void)
     ESP_RETURN_ON_ERROR(pmu_update(0x68, 0x01, 0x01), TAG, "pmu batdet");
     /* Charge target 4.2 V (CV field value 3; 2 would be 4.1 V). */
     ESP_RETURN_ON_ERROR(pmu_update(0x64, 0x07, 0x03), TAG, "pmu cv");
-    /* Conservative charge profile until the cell is known: 200 mA constant
-     * current, 25 mA termination, 50 mA precharge.  Adjust for the actual
-     * capacity before the first full charge. */
+    /* 402728 cell: 3.7 V nominal, 400 mAh, no thermistor.  200 mA is 0.5 C,
+     * which keeps the charge under about two hours; 25 mA termination and
+     * 50 mA precharge are C/16 and C/8. */
     ESP_RETURN_ON_ERROR(pmu_update(0x62, 0x1F, 0x08), TAG, "pmu ichg");
     ESP_RETURN_ON_ERROR(pmu_update(0x63, 0x0F, 0x01), TAG, "pmu iterm");
     ESP_RETURN_ON_ERROR(pmu_update(0x61, 0x0F, 0x02), TAG, "pmu ipre");
+    /* PWRKEY: hold for 10 s to cut the rails.  A short or fumbling press must
+     * never turn the watch off, and the PMU does this even if the firmware is
+     * stuck.  Bits 3:2 select the off time, bits 1:0 the power-on press. */
+    uint8_t key_cfg = 0;
+    ESP_RETURN_ON_ERROR(reg_read(s_pmu, 0x27, &key_cfg, 1), TAG, "pmu key");
+    ESP_RETURN_ON_ERROR(pmu_update(0x27, 0x0C, 0x0C), TAG, "pmu key off");
+    ESP_LOGI(TAG, "PWRKEY 0x27: 0x%02X -> 0x%02X (10 s hold powers off)",
+             key_cfg, (uint8_t)(key_cfg | 0x0C));
 
     ESP_LOGI(TAG, "AXP2101 ready (status 0x%02X)", status);
     return ESP_OK;
+}
+
+esp_err_t mosu_board_pmu_power_off(void)
+{
+    if (!s_pmu) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    /* REG 0x10 bit 0 asks the PMU to remove the system rails.  With VBUS
+     * present it may stay alive to keep charging; on the cell it cuts. */
+    return pmu_update(0x10, 0x01, 0x01);
 }
 
 esp_err_t mosu_board_pmu_read(mosu_board_pmu_t *out)
@@ -428,10 +446,12 @@ void mosu_board_pmu_dump(void)
         printf("pmu : reg 0x%02X = 0x%02X\n", reg, value);
     }
 
-    /* Charging-related registers: TS pin mode, precharge/constant current,
-     * termination current and CV target.  Printing them makes the battery
-     * bring-up check possible without a vendor tool. */
-    static const uint8_t charge_regs[] = {0x50, 0x61, 0x62, 0x63, 0x64};
+    /* Power-key timing, interrupt flags, TS pin mode, precharge/constant
+     * current, termination current and CV target.  Printing them makes the
+     * battery bring-up check possible without a vendor tool. */
+    static const uint8_t charge_regs[] = {
+        0x27, 0x49, 0x50, 0x61, 0x62, 0x63, 0x64,
+    };
     for (size_t i = 0; i < sizeof(charge_regs) / sizeof(charge_regs[0]); i++) {
         uint8_t value = 0;
         esp_err_t err = reg_read(s_pmu, charge_regs[i], &value, 1);
