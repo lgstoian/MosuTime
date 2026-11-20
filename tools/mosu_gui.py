@@ -466,19 +466,18 @@ def esptool_flash(port, image, emit):
 
         def write(self, text):
             self.pending += text
-            while True:
-                marks = [i for i in (self.pending.find("\n"),
-                                     self.pending.find("\r")) if i >= 0]
-                if not marks:
-                    break
-                cut = min(marks)
-                line, self.pending = self.pending[:cut], self.pending[cut + 1:]
+            while "\n" in self.pending:
+                line, self.pending = self.pending.split("\n", 1)
+                # esptool redraws progress with \r; keep the final state only.
+                if "\r" in line:
+                    line = line.split("\r")[-1]
                 if line.strip():
                     emit(line.rstrip())
 
         def flush(self):
-            if self.pending.strip():
-                emit(self.pending.rstrip())
+            tail = self.pending.split("\r")[-1]
+            if tail.strip():
+                emit(tail.rstrip())
             self.pending = ""
 
     sink = Sink()

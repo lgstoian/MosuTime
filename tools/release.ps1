@@ -18,6 +18,9 @@ param(
 
 $ErrorActionPreference = "Continue"
 $root = Split-Path -Parent $PSScriptRoot
+# Capture the system Python before build.ps1 dotsources export.ps1, which
+# would otherwise put the IDF environment's python (no PyInstaller) first.
+$systemPython = (Get-Command python -ErrorAction SilentlyContinue).Source
 Push-Location $root
 try {
     if (-not $Tag) {
@@ -33,9 +36,9 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "firmware build failed" }
     }
 
-    $merged = Join-Path $root "build\MosuTime.bin"
+    $merged = Join-Path $root "build\merged-binary.bin"
     if (-not (Test-Path $merged)) {
-        throw "build/MosuTime.bin is missing; build with -MergeBin first"
+        throw "build/merged-binary.bin is missing; build with -MergeBin first"
     }
     Copy-Item $merged (Join-Path $out "$name-merged.bin") -Force
 
@@ -50,10 +53,13 @@ try {
 
     $guiWork = Join-Path $root "build\gui"
     New-Item -ItemType Directory -Force -Path $guiWork | Out-Null
-    python -m PyInstaller --noconfirm --clean --onefile --windowed `
+    if (-not $systemPython) { throw "no system python found for PyInstaller" }
+    $cfgData = (Join-Path $root "sd_card\mosu.cfg") + ";sd_card"
+    $voiceData = (Join-Path $root "sd_card\voice") + ";sd_card/voice"
+    & $systemPython -m PyInstaller --noconfirm --clean --onefile --windowed `
         --name MosuTimeManager `
-        --add-data "sd_card/mosu.cfg;sd_card" `
-        --add-data "sd_card/voice;sd_card/voice" `
+        --add-data $cfgData `
+        --add-data $voiceData `
         --collect-all esptool `
         --hidden-import serial `
         --hidden-import serial.tools.list_ports `
