@@ -93,7 +93,7 @@ replaces [`docs/bringup.md`](docs/bringup.md).
 | --- | --- |
 | [`tools/build.ps1`](tools/build.ps1) | Windows wrapper that sources ESP-IDF, builds, and optionally flashes/monitors. |
 | [`tools/push_sd.py`](tools/push_sd.py) | Formats the card on the watch (`--format`) and uploads `mosu.cfg` plus the voice clips over the USB console with an ACK per 4 KB chunk and a CRC-32 per file. |
-| [`tools/mosu_gui.py`](tools/mosu_gui.py), [`tools/mosu-gui.cmd`](tools/mosu-gui.cmd) | Windows manager: dashboard, console, build/flash through `tools/build.ps1`, SD format and push, shutdown. |
+| [`tools/mosu_gui.py`](tools/mosu_gui.py), [`tools/mosu-gui.cmd`](tools/mosu-gui.cmd) | Windows manager: dashboard, console, a full `mosu.cfg` editor with the firmware's ranges, build/flash through `tools/build.ps1`, SD format and push, shutdown. |
 | [`tools/gen_voice.py`](tools/gen_voice.py) | Runs the Romanian ONNX voice with onnxruntime and renders the 78 WAV clips into `sd_card/voice` (or `--out`). Trims silence, normalises, fades; `--preview` joins four announcements for a listening check. No GPL tool involved. |
 | [`tools/mosu_g2p.py`](tools/mosu_g2p.py) | Romanian pronunciation: a 38-word IPA lexicon plus the `și` sandhi rule. `--selftest` checks the rules, `--plan` prints all 78 phrases with their phonemes. |
 | [`tools/check_voice.py`](tools/check_voice.py) | Verifies a voice folder: exact names, mono 16-bit WAV, no clipping, no silent clips, and a duration that matches the phrase each clip says. |

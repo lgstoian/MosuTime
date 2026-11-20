@@ -126,9 +126,11 @@ FAT32 volume that Windows accepts and FatFs rejects (`failed to mount card
 
 `tools/mosu-gui.cmd` (or `python tools/mosu_gui.py`) opens a small manager for
 the watch: a dashboard with firmware version, MAC, clock, battery and SD state;
-a console tab; build and flash through `tools/build.ps1`; SD format and file
-push; and a shutdown button. It needs `pyserial` (`python -m pip install
-pyserial`) and the same ESP-IDF 5.5.x installation as the build script.
+a console tab; a **Settings** tab that edits every key in `sd_card/mosu.cfg`
+with the firmware's own ranges and pushes it to the card; build and flash
+through `tools/build.ps1`; SD format and file push; and a shutdown button. It
+needs `pyserial` (`python -m pip install pyserial`) and the same ESP-IDF 5.5.x
+installation as the build script.
 
 Edit the Wi-Fi network and brightness in `sd_card/mosu.cfg` (or pass `--ssid`
 and `--pass` to the push tool), generate the voice with the script below, then

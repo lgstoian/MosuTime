@@ -18,6 +18,7 @@ so one cable is enough.  Run with:
 
 import os
 import queue
+import re
 import struct
 import subprocess
 import sys
@@ -25,7 +26,7 @@ import threading
 import time
 import tkinter as tk
 import zlib
-from tkinter import filedialog, messagebox, ttk
+from tkinter import colorchooser, filedialog, messagebox, ttk
 
 try:
     import serial
@@ -172,6 +173,223 @@ def pick_port(port):
     return None
 
 
+class Field:
+    """One mosu.cfg key, its type, its range and a short help line."""
+
+    def __init__(self, section, key, label, kind, default, lo=None, hi=None,
+                 step=1, choices=None, hint="", secret=False):
+        self.section = section
+        self.key = key
+        self.label = label
+        self.kind = kind
+        self.default = default
+        self.lo = lo
+        self.hi = hi
+        self.step = step
+        self.choices = choices or []
+        self.hint = hint
+        self.secret = secret
+
+
+SCHEMA = [
+    Field("device", "name", "Device name", "text", "MosuTime",
+          hint="Shown in the console only"),
+    Field("device", "log_level", "Log level", "enum", "info",
+          choices=["none", "error", "warn", "info", "debug", "verbose"],
+          hint="Console and USB log detail"),
+
+    Field("display", "brightness", "Brightness", "int", 55, 1, 100,
+          hint="1..100, the same at every wake"),
+    Field("display", "screen_on_ms", "Screen on time", "int", 15000, 1000,
+          300000, 500, hint="Milliseconds after a touch or wrist raise"),
+    Field("display", "wake_on_touch", "Touch wake", "bool", True,
+          hint="Touch the glass to light the face"),
+    Field("display", "wake_on_motion", "Wrist raise wake", "bool", True,
+          hint="Raise the arm to light the face"),
+    Field("display", "motion_angle_deg", "Raise angle", "int", 35, 10, 80,
+          hint="Minimum wrist angle in degrees"),
+    Field("display", "motion_refractory_ms", "Raise gap", "int", 2500, 300,
+          20000, 100, hint="Ignore raises this long after one"),
+    Field("display", "motion_poll_hz", "IMU poll rate", "int", 8, 1, 20,
+          hint="Samples per second while the screen is off (4..8 keeps power low)"),
+    Field("display", "pixel_shift_sec", "Pixel shift", "int", 180, 0, 3600,
+          10, hint="Move the face 1..2 px to avoid burn-in; 0 = off"),
+    Field("display", "tap_feedback_ms", "Tap border", "int", 250, 0, 2000, 50,
+          hint="Border flash after a double tap; 0 = none"),
+
+    Field("colors", "background", "Background", "color", "#000000"),
+    Field("colors", "time_am", "Time (AM)", "color", "#FFFFFF",
+          hint="Digits in the morning"),
+    Field("colors", "time_pm", "Time (PM)", "color", "#FFC98A",
+          hint="Digits in the afternoon and evening"),
+    Field("colors", "battery_green", "Battery green", "color", "#00E676"),
+    Field("colors", "battery_orange", "Battery orange", "color", "#FFAB00"),
+    Field("colors", "battery_red", "Battery red", "color", "#FF1744"),
+    Field("colors", "wifi_idle", "Wi-Fi idle", "color", "#8A8A8A",
+          hint="Grey: not synced yet"),
+    Field("colors", "wifi_ok", "Wi-Fi ok", "color", "#00E676"),
+    Field("colors", "wifi_fail", "Wi-Fi failed", "color", "#FF1744"),
+    Field("colors", "tap_border", "Tap border", "color", "#FFFFFF"),
+
+    Field("status", "battery_green_min", "Green from", "int", 40, 1, 100,
+          hint="Percent at or above this is green"),
+    Field("status", "battery_orange_min", "Orange from", "int", 15, 1, 100,
+          hint="Percent at or above this is orange, below is red"),
+    Field("status", "show_battery", "Show battery icon", "bool", True),
+    Field("status", "show_wifi", "Show Wi-Fi icon", "bool", True),
+    Field("status", "wifi_fail_slash", "Slash on failure", "bool", True,
+          hint="Cross the Wi-Fi icon when the last sync failed"),
+
+    Field("clock", "timezone", "Timezone", "text", "Europe/Bucharest",
+          hint="IANA name, POSIX TZ or a numeric offset"),
+    Field("clock", "auto_timezone", "Automatic timezone", "bool", True,
+          hint="Ask the network for the zone using the IP address"),
+    Field("clock", "geo_url", "Geolocation URL", "text",
+          "http://ip-api.com/line/?fields=timezone,offset",
+          hint="Plain text, two lines or JSON with timezone/offset"),
+    Field("clock", "ntp1", "NTP server 1", "text", "pool.ntp.org"),
+    Field("clock", "ntp2", "NTP server 2", "text", "time.google.com"),
+    Field("clock", "sync_hours", "Sync interval", "int", 6, 1, 168,
+          hint="Hours between syncs when sync_per_day is 0"),
+    Field("clock", "sync_per_day", "Syncs per day", "int", 0, 0, 24,
+          hint="Overrides the interval: 4 = every 6 h, 24 = hourly, 0 = off"),
+    Field("clock", "wifi_always_on", "Wi-Fi always on", "bool", False,
+          hint="Keep the radio on; costs far more current"),
+    Field("clock", "manual_time", "Manual time", "text", "",
+          hint='Fallback "YYYY-MM-DD HH:MM", local time'),
+
+    *[field for i in range(1, 9) for field in (
+        Field("wifi", "network%d_ssid" % i, "Network %d SSID" % i, "text", "",
+              hint="Tried in order; leave blank to disable" if i == 1 else ""),
+        Field("wifi", "network%d_pass" % i, "Network %d password" % i,
+              "secret", "", secret=True),
+    )],
+
+    Field("announce", "enabled", "Voice announcement", "bool", True,
+          hint="A double tap speaks the time"),
+    Field("announce", "double_tap_ms", "Double tap window", "int", 650, 200,
+          1500, 50, hint="Maximum gap between the two taps"),
+    Field("announce", "max_hold_ms", "Tap hold", "int", 400, 80, 1500, 10,
+          hint="Longest press that still counts as a tap"),
+    Field("announce", "max_move_px", "Tap movement", "int", 40, 4, 200,
+          hint="How far the finger may slide"),
+    Field("announce", "cooldown_ms", "Announcement cooldown", "int", 2000, 300,
+          10000, 100, hint="Pause after a sentence, to avoid repeats"),
+    Field("announce", "volume", "Volume", "int", 85, 0, 100),
+    Field("announce", "announce_day", "Say the weekday", "bool", True),
+    Field("announce", "voice_dir", "Voice folder", "text", "/sdcard/voice"),
+    Field("announce", "clip_gap_ms", "Clip gap", "int", 60, 0, 1000, 10,
+          hint="Pause between the WAV fragments"),
+]
+
+
+class ConfigFile:
+    """Read/write mosu.cfg while keeping every comment and blank line."""
+
+    def __init__(self, path):
+        self.path = path
+        with open(path, "r", encoding="utf-8", newline="") as handle:
+            self.text = handle.read()
+
+    def save(self, path=None):
+        with open(path or self.path, "w", encoding="utf-8", newline="") as handle:
+            handle.write(self.text)
+
+    def _lines(self):
+        return self.text.splitlines(keepends=True)
+
+    def get(self, section, key):
+        current = ""
+        for raw in self._lines():
+            s = raw.strip()
+            if s.startswith("[") and s.endswith("]"):
+                current = s[1:-1].strip().lower()
+                continue
+            if not s or s.startswith("#") or s.startswith(";") or "=" not in raw:
+                continue
+            lhs, rhs = raw.split("=", 1)
+            if current == section and lhs.strip().lower() == key:
+                return rhs.strip()
+        return None
+
+    def set(self, section, key, value):
+        lines = self._lines()
+        current = ""
+        last_in_section = None
+        comment_line = None
+        for index, raw in enumerate(lines):
+            s = raw.strip()
+            if s.startswith("[") and s.endswith("]"):
+                current = s[1:-1].strip().lower()
+                continue
+            if s.startswith("#") and current == section:
+                body = s.lstrip("#").strip()
+                if "=" in body and body.split("=", 1)[0].strip().lower() == key:
+                    comment_line = index
+                continue
+            if not s or s.startswith(";") or "=" not in raw:
+                continue
+            if current == section:
+                last_in_section = index
+            lhs, rhs = raw.split("=", 1)
+            if current == section and lhs.strip().lower() == key:
+                indent = raw[:len(raw) - len(raw.lstrip())]
+                eol = "\r\n" if raw.endswith("\r\n") else "\n"
+                comment = self._comment(rhs)
+                lines[index] = "%s%s = %s%s%s" % (
+                    indent, key, value, comment, eol)
+                self.text = "".join(lines)
+                return
+        line = "%s = %s\n" % (key, value)
+        if comment_line is not None:
+            raw = lines[comment_line]
+            indent = raw[:len(raw) - len(raw.lstrip())]
+            eol = "\r\n" if raw.endswith("\r\n") else "\n"
+            lines[comment_line] = "%s%s = %s%s" % (indent, key, value, eol)
+        elif last_in_section is not None:
+            eol = "\r\n" if lines[last_in_section].endswith("\r\n") else "\n"
+            lines.insert(last_in_section + 1, line.replace("\n", eol))
+        else:
+            lines.append("\n[%s]\n%s" % (section, line))
+        self.text = "".join(lines)
+
+    @staticmethod
+    def _comment(rhs):
+        quote = False
+        for index, ch in enumerate(rhs):
+            if ch == '"':
+                quote = not quote
+            elif ch == "#" and not quote and index and rhs[index - 1] == " ":
+                return " " + rhs[index - 1:].strip()
+        return ""
+
+
+def parse_raw(field, raw):
+    if raw is None:
+        return field.default
+    text = raw.strip()
+    if field.kind in ("text", "secret"):
+        if len(text) >= 2 and text[0] == '"' and text[-1] == '"':
+            text = text[1:-1]
+        return text
+    if field.kind == "bool":
+        return text.lower() in ("true", "yes", "on", "1")
+    if field.kind == "int":
+        try:
+            return int(text)
+        except ValueError:
+            return field.default
+    return text
+
+
+def format_value(field, value):
+    if field.kind in ("text", "secret"):
+        return '"%s"' % value
+    if field.kind == "bool":
+        return "true" if value else "false"
+    return str(value)
+
+
 class App:
     def __init__(self, root):
         self.root = root
@@ -258,15 +476,18 @@ class App:
         self.tab_dash = ttk.Frame(self.tabs, padding=14)
         self.tab_console = ttk.Frame(self.tabs, padding=14)
         self.tab_firmware = ttk.Frame(self.tabs, padding=14)
+        self.tab_settings = ttk.Frame(self.tabs, padding=10)
         self.tab_sd = ttk.Frame(self.tabs, padding=14)
         self.tab_power = ttk.Frame(self.tabs, padding=14)
         self.tabs.add(self.tab_dash, text="Dashboard")
         self.tabs.add(self.tab_console, text="Console")
+        self.tabs.add(self.tab_settings, text="Settings")
         self.tabs.add(self.tab_firmware, text="Firmware")
         self.tabs.add(self.tab_sd, text="SD card")
         self.tabs.add(self.tab_power, text="Power")
         self.build_dashboard()
         self.build_console()
+        self.build_settings()
         self.build_firmware()
         self.build_sd()
         self.build_power()
@@ -372,6 +593,259 @@ class App:
         ttk.Button(entry_row, text="Send", style="Accent.TButton",
                    command=self.send_console).pack(side="left", padx=(8, 0))
 
+    # -------------------------------------------------------------- settings
+
+    def scrollable(self, parent):
+        canvas = tk.Canvas(parent, bg=BG, highlightthickness=0)
+        bar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        inner = ttk.Frame(canvas)
+        window = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def resize(_event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        def widen(event):
+            canvas.itemconfigure(window, width=event.width)
+
+        def wheel(event):
+            canvas.yview_scroll(int(-event.delta / 120), "units")
+
+        inner.bind("<Configure>", resize)
+        canvas.bind("<Configure>", widen)
+        canvas.bind("<Enter>", lambda _e: canvas.bind_all("<MouseWheel>", wheel))
+        canvas.bind("<Leave>", lambda _e: canvas.unbind_all("<MouseWheel>"))
+        canvas.pack(side="left", fill="both", expand=True)
+        bar.pack(side="right", fill="y")
+        canvas.configure(yscrollcommand=bar.set)
+        return inner
+
+    def build_settings(self):
+        self.s_vars = {}
+        self.s_fields = {}
+        self.s_modified = False
+        self.s_loading = False
+
+        bar = ttk.Frame(self.tab_settings)
+        bar.pack(fill="x", pady=(0, 8))
+        ttk.Button(bar, text="Reload file", command=self.settings_reload).pack(
+            side="left")
+        ttk.Button(bar, text="Save file", command=self.settings_save).pack(
+            side="left", padx=8)
+        ttk.Button(bar, text="Save and push", style="Accent.TButton",
+                   command=self.settings_push).pack(side="left")
+        ttk.Button(bar, text="Reboot to apply",
+                   command=self.reboot).pack(side="left", padx=8)
+        self.s_state = ttk.Label(bar, text="", style="Muted.TLabel")
+        self.s_state.pack(side="left", padx=12)
+
+        ttk.Label(
+            self.tab_settings,
+            text="%s - the file the watch reads at boot. Every value is "
+                 "checked against the firmware's range before it is written. "
+                 "Push writes only mosu.cfg; reboot applies it." % SD_CFG,
+            style="Muted.TLabel", wraplength=900, justify="left").pack(
+                anchor="w", pady=(0, 8))
+
+        pages = ttk.Notebook(self.tab_settings)
+        pages.pack(fill="both", expand=True)
+        titles = [
+            ("device", "Device"), ("display", "Display"), ("colors", "Colours"),
+            ("status", "Status"), ("clock", "Clock and network"),
+            ("wifi", "Wi-Fi"), ("announce", "Voice"),
+        ]
+        for section, title in titles:
+            page = ttk.Frame(pages, padding=10)
+            pages.add(page, text=title)
+            inner = self.scrollable(page)
+            for field in [f for f in SCHEMA if f.section == section]:
+                self.add_field(inner, field)
+
+        self.settings_reload(silent=True)
+
+    def add_field(self, parent, field):
+        row = ttk.Frame(parent)
+        row.pack(fill="x", pady=(7, 10))
+        row.columnconfigure(0, weight=1)
+
+        text = ttk.Frame(row)
+        text.grid(row=0, column=0, sticky="w")
+        tk.Label(text, text=field.label, bg=BG, fg=FG,
+                 font=("Segoe UI", 10)).pack(anchor="w")
+        if field.hint:
+            tk.Label(text, text=field.hint, bg=BG, fg=MUTED,
+                     font=("Segoe UI", 8), wraplength=620,
+                     justify="left").pack(anchor="w")
+
+        holder = ttk.Frame(row)
+        holder.grid(row=0, column=1, sticky="e")
+        key = (field.section, field.key)
+
+        if field.kind == "bool":
+            var = tk.BooleanVar()
+            ttk.Checkbutton(holder, variable=var).pack(side="right")
+        elif field.kind == "int":
+            var = tk.StringVar()
+            ttk.Spinbox(holder, from_=field.lo, to=field.hi,
+                        increment=field.step, textvariable=var,
+                        width=9).pack(side="right")
+        elif field.kind == "enum":
+            var = tk.StringVar()
+            ttk.Combobox(holder, textvariable=var, values=field.choices,
+                         state="readonly", width=10).pack(side="right")
+        elif field.kind == "color":
+            var = tk.StringVar()
+            swatch = tk.Canvas(holder, width=30, height=20, bg=BG,
+                               highlightthickness=0)
+            swatch.pack(side="right", padx=(6, 0))
+            ttk.Button(holder, text="Pick",
+                       command=lambda v=var: self.pick_colour(v)).pack(
+                           side="right", padx=(6, 0))
+            ttk.Entry(holder, textvariable=var, width=9).pack(side="right")
+            var.trace_add("write", lambda *_a, c=swatch, v=var:
+                          self.paint_swatch(c, v))
+            self.paint_swatch(swatch, var)
+        else:
+            var = tk.StringVar()
+            ttk.Entry(holder, textvariable=var, width=40,
+                      show="*" if field.secret else "").pack(side="right")
+
+        var.trace_add("write", lambda *_a: self.settings_touched())
+        self.s_vars[key] = var
+        self.s_fields[key] = field
+
+    def paint_swatch(self, canvas, var):
+        try:
+            canvas.configure(bg=var.get() or BG)
+        except tk.TclError:
+            canvas.configure(bg=BG)
+
+    def pick_colour(self, var):
+        _rgb, chosen = colorchooser.askcolor(color=var.get() or "#FFFFFF",
+                                             parent=self.root,
+                                             title="Colour")
+        if chosen:
+            var.set(chosen.upper())
+
+    def settings_touched(self):
+        if getattr(self, "s_loading", False):
+            return
+        if self.s_modified:
+            return
+        self.s_modified = True
+        self.s_state.configure(text="modified", foreground=AMBER)
+
+    def settings_reload(self, silent=False):
+        if self.s_modified and not silent:
+            if not messagebox.askyesno("MosuTime Manager",
+                                       "Discard the changes in the editor?"):
+                return
+        if not os.path.isfile(SD_CFG):
+            messagebox.showerror("MosuTime Manager",
+                                 "%s was not found." % SD_CFG)
+            return
+        cfg = ConfigFile(SD_CFG)
+        self.s_loading = True
+        for (section, key), var in self.s_vars.items():
+            field = self.s_fields[(section, key)]
+            value = parse_raw(field, cfg.get(section, key))
+            if field.kind == "bool":
+                var.set(bool(value))
+            elif field.kind == "int":
+                var.set(str(value))
+            else:
+                var.set(value)
+        self.s_loading = False
+        self.s_modified = False
+        self.s_state.configure(text="loaded", foreground=GREEN)
+
+    def settings_values(self):
+        """Validate every field; returns (values, errors)."""
+        values = {}
+        errors = []
+        for (section, key), var in self.s_vars.items():
+            field = self.s_fields[(section, key)]
+            if field.kind == "bool":
+                values[(section, key)] = bool(var.get())
+                continue
+            text = str(var.get()).strip()
+            if field.kind == "int":
+                try:
+                    number = int(text)
+                except ValueError:
+                    errors.append("%s: not a number" % field.label)
+                    continue
+                if not (field.lo <= number <= field.hi):
+                    errors.append("%s: %d..%d" % (field.label, field.lo,
+                                                  field.hi))
+                    continue
+                values[(section, key)] = number
+            elif field.kind == "color":
+                colour = text.upper()
+                if not re.fullmatch(r"#[0-9A-F]{6}", colour):
+                    errors.append("%s: use #RRGGBB" % field.label)
+                    continue
+                values[(section, key)] = colour
+            else:
+                if '"' in text or "\n" in text:
+                    errors.append("%s: quotes and newlines are not allowed"
+                                  % field.label)
+                    continue
+                if len(text) > 160:
+                    errors.append("%s: too long" % field.label)
+                    continue
+                values[(section, key)] = text
+        if not errors:
+            green = values[("status", "battery_green_min")]
+            orange = values[("status", "battery_orange_min")]
+            if orange > green:
+                errors.append("Status: orange threshold must not exceed green")
+        return values, errors
+
+    def settings_save(self, silent=False):
+        values, errors = self.settings_values()
+        if errors:
+            messagebox.showerror("MosuTime Manager",
+                                 "Fix these values first:\n\n" +
+                                 "\n".join(errors[:12]))
+            return False
+        cfg = ConfigFile(SD_CFG)
+        for (section, key), value in values.items():
+            field = self.s_fields[(section, key)]
+            cfg.set(section, key, format_value(field, value))
+        cfg.save()
+        self.s_modified = False
+        self.s_state.configure(text="saved", foreground=GREEN)
+        if not silent:
+            self.log("settings saved to %s" % SD_CFG)
+        return True
+
+    def settings_push(self):
+        if not self.device.open:
+            messagebox.showinfo("MosuTime Manager",
+                                "Connect to the watch first; the file travels "
+                                "over the USB console.")
+            return
+        if not self.settings_save(silent=True):
+            return
+        with open(SD_CFG, "rb") as handle:
+            data = handle.read()
+
+        def work():
+            self.device.send("md /sdcard")
+            self.device.drain(0.3)
+            ok = self.push_file("/sdcard/mosu.cfg", data, "mosu.cfg")
+            self.root.after(0, self.settings_pushed, ok)
+
+        self.run_worker(work, "Pushing mosu.cfg...")
+
+    def settings_pushed(self, ok):
+        self.s_state.configure(text="pushed" if ok else "push failed",
+                               foreground=GREEN if ok else RED)
+        if ok and messagebox.askyesno(
+                "MosuTime Manager",
+                "mosu.cfg is on the card.\n\nReboot the watch now to apply it?"):
+            self.quick("reboot")
+
     def build_firmware(self):
         intro = ttk.Label(
             self.tab_firmware,
@@ -399,23 +873,14 @@ class App:
         self.fw_text.configure(state="disabled")
 
     def build_sd(self):
-        cfg = self.card(self.tab_sd, "Configuration")
-        cfg.pack(fill="x", pady=(0, 10))
-        row = ttk.Frame(cfg, style="Panel.TFrame")
-        row.pack(fill="x", pady=(10, 0))
-        ttk.Label(row, text="Wi-Fi SSID", style="PanelMuted.TLabel",
-                  width=12).pack(side="left")
-        self.ssid_var = tk.StringVar()
-        ttk.Entry(row, textvariable=self.ssid_var, width=28).pack(side="left")
-        row2 = ttk.Frame(cfg, style="Panel.TFrame")
-        row2.pack(fill="x", pady=(8, 0))
-        ttk.Label(row2, text="Password", style="PanelMuted.TLabel",
-                  width=12).pack(side="left")
-        self.pass_var = tk.StringVar()
-        ttk.Entry(row2, textvariable=self.pass_var, width=28,
-                  show="*").pack(side="left")
-        ttk.Label(cfg, text="Leave blank to keep the values in sd_card/mosu.cfg.",
-                  style="PanelMuted.TLabel").pack(anchor="w", pady=(8, 0))
+        ttk.Label(
+            self.tab_sd,
+            text="The card holds mosu.cfg and the voice clips. Edit the "
+                 "settings in the Settings tab first; this pushes the saved "
+                 "file. Formatting repairs a card that a PC formatter made "
+                 "unreadable and erases everything on it.",
+            style="Muted.TLabel", wraplength=880, justify="left").pack(
+                anchor="w", pady=(0, 10))
 
         bar = ttk.Frame(self.tab_sd)
         bar.pack(fill="x", pady=(0, 8))
@@ -808,6 +1273,8 @@ class App:
         if not os.path.isfile(SD_CFG):
             messagebox.showerror("MosuTime Manager", "sd_card/mosu.cfg is missing.")
             return
+        if not self.settings_save(silent=True):
+            return
         names = []
         if os.path.isdir(SD_VOICE):
             names = sorted(n for n in os.listdir(SD_VOICE) if n.endswith(".wav"))
@@ -817,15 +1284,14 @@ class App:
                 "Push mosu.cfg and %d voice clips (%d KiB) to the card?"
                 % (len(names), total // 1024)):
             return
-        ssid = self.ssid_var.get().strip()
-        password = self.pass_var.get()
 
         def work():
             self.sd_state.configure(text="pushing...")
             self.device.drain(0.2)
             self.device.send("md /sdcard/voice")
             self.device.drain(0.3)
-            cfg = self.build_config(ssid, password)
+            with open(SD_CFG, "rb") as handle:
+                cfg = handle.read()
             ok = self.push_file("/sdcard/mosu.cfg", cfg, "mosu.cfg")
             done = 0
             if ok and names:
@@ -859,19 +1325,6 @@ class App:
                                 foreground=GREEN if ok else RED)
         if ok:
             self.quick("ls /sdcard/voice")
-
-    def build_config(self, ssid, password):
-        with open(SD_CFG, "rb") as handle:
-            text = handle.read().decode("utf-8")
-        if ssid:
-            text = text.replace('network1_ssid = "Acasa"',
-                                'network1_ssid = "%s"' % ssid)
-        if password:
-            text = text.replace('network1_pass = "parola"',
-                                'network1_pass = "%s"' % password)
-        if not text.endswith("\n"):
-            text += "\n"
-        return text.encode("utf-8")
 
     def push_file(self, target, data, label):
         self.device.send("receive %s %d /crc" % (target, len(data)))
@@ -933,9 +1386,14 @@ def selftest():
     assert app.p_bar["value"] == 98
     assert app.d_tz.get() == "Europe/Bucharest"
     assert app.d_sd.get() == "mounted"
-    config = app.build_config("camera", "secret")
-    assert b'network1_ssid = "camera"' in config
-    assert b'network1_pass = "secret"' in config
+    cfg = ConfigFile(SD_CFG)
+    original = cfg.get("display", "brightness")
+    cfg.set("display", "brightness", "42")
+    assert cfg.get("display", "brightness") == "42"
+    cfg.set("display", "brightness", original)
+    values, errors = app.settings_values()
+    assert not errors, errors
+    assert values[("display", "brightness")] == int(original)
     root.destroy()
     print("selftest: OK")
 
