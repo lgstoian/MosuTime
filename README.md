@@ -20,7 +20,7 @@ A double tap on the glass says the time out loud in Romanian, for example
 *"Este ora două și treizeci de minute. Marți."* The voice clips live on the SD
 card, not in flash.
 
-**Download:** [MosuTime v1.0.0](https://github.com/lgstoian/MosuTime/releases/tag/v1.0.0)
+**Download:** [MosuTime v1.1.0](https://github.com/lgstoian/MosuTime/releases/tag/v1.1.0)
 has the merged firmware image, the self-contained Windows manager
 (`MosuTimeManager.exe`), the SD card zip and checksums. Flashing and first-run
 steps are in [`docs/release.md`](docs/release.md).
