@@ -24,6 +24,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "nvs_flash.h"
 
 #if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
 #include "driver/usb_serial_jtag.h"
@@ -399,7 +400,7 @@ static void handle_line(char *line)
         printf("  ls [path] | rm <path> | rx bench <bytes>\n");
         printf("  wifi <ssid> <password> | scan | presence | clear | status\n");
         printf("  screenshot [path] | power screen on|off | power wifi |\n");
-        printf("  power idle | poweroff\n");
+        printf("  power idle | poweroff | nvs erase\n");
     } else if (!strncmp(line, "receive ", 8)) {
         char path[128];
         unsigned long size = 0;
@@ -685,6 +686,14 @@ static void handle_line(char *line)
         }
         s_hooks.power_idle();
         printf("idle power requested\n");
+    } else if (!strcmp(line, "nvs erase")) {
+        printf("nvs erase: wiping the cached config and Wi-Fi calibration...\n");
+        fflush(stdout);
+        esp_err_t err = nvs_flash_erase();
+        printf("nvs erase: %s, rebooting\n", esp_err_to_name(err));
+        fflush(stdout);
+        vTaskDelay(pdMS_TO_TICKS(300));
+        esp_restart();
     } else if (!strcmp(line, "poweroff") || !strcmp(line, "shutdown")) {
         printf("poweroff: saving the clock and cutting the rails\n");
         fflush(stdout);

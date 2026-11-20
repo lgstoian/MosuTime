@@ -315,7 +315,7 @@ test screen [colors|grid|corners|off] | test touch | test audio
 screenshot [path] | sd remount | sd verbose | sd dump
 sd format yes | receive <path> <size> [/crc] | md <path> | ls [path]
 rm <path> | rx bench <bytes> | power screen on|off | power wifi | power idle
-poweroff
+poweroff | nvs erase
 ```
 
 `bright` and `vol` change the value at runtime; edit `mosu.cfg` to make it

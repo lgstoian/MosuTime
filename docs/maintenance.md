@@ -286,6 +286,10 @@ A card formatted by a PC can fail with `failed to mount card (13)` even though
 Windows opens it. That is FatFs rejecting an incomplete FAT32 table, not a
 wiring fault: let the watch format it (`sd format yes`) and push again.
 
+If the watch keeps using an old configuration, erase the NVS cache with
+`nvs erase` (or **Factory reset (NVS)** in the app) and reboot; it reloads
+`mosu.cfg` from the card, or the built-in defaults when there is no card.
+
 ## 7. Turn the watch off
 
 The watch is meant to stay on. There are two ways to cut power:

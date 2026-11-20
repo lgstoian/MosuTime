@@ -14,6 +14,7 @@ boot log and the long-standing commands instead, and note it.
 | `help`, `status`, `time`, `sync`, `say`, `settime`, `bright`, `vol`, `tap`, `reboot` | long-standing | day-to-day maintenance |
 | `i2c`, `pmu`, `rtc`, `imu`, `pm`, `heap`, `tasks`, `display`, `test screen`, `test touch`, `test audio`, `screenshot`, `sd remount`, `config`, `power` | bring-up extension | this checklist |
 | `sd format yes`, `receive`, `md`, `ls`, `rm`, `rx bench` | SD bring-up / USB upload | format the card and push files without a reader |
+| `nvs erase` | recovery | wipe the cached config and Wi-Fi calibration, then reboot |
 | `wifi <ssid> <pass>`, `wifi scan`, `wifi presence`, `wifi clear`, `wifi status` | bring-up / card-less provisioning | network tests |
 
 **Session 1 (2026-11-19, COM11, no battery, no SD card).** The I2C inventory,

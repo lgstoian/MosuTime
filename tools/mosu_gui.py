@@ -567,9 +567,13 @@ class App:
                           ("Version", "version"), ("PMU", "pmu"),
                           ("Config", "config"), ("Files", "ls /sdcard"),
                           ("Test audio", "test audio"),
+                          ("Save log", None),
                           ("Clear", None)):
-            if cmd is None:
+            if text == "Clear":
                 ttk.Button(bar, text=text, command=self.clear_log).pack(
+                    side="left", padx=(0, 6))
+            elif text == "Save log":
+                ttk.Button(bar, text=text, command=self.save_log).pack(
                     side="left", padx=(0, 6))
             else:
                 ttk.Button(bar, text=text,
@@ -863,6 +867,8 @@ class App:
                    command=self.build_flash).pack(side="left", padx=8)
         ttk.Button(bar, text="Open build folder",
                    command=self.open_build).pack(side="left")
+        ttk.Button(bar, text="Factory reset (NVS)", style="Danger.TButton",
+                   command=self.factory_reset).pack(side="left", padx=8)
         self.fw_state = ttk.Label(bar, text="", style="Muted.TLabel")
         self.fw_state.pack(side="left", padx=12)
 
@@ -890,6 +896,8 @@ class App:
                    command=self.push_sd).pack(side="left", padx=8)
         ttk.Button(bar, text="List files",
                    command=lambda: self.quick("ls /sdcard")).pack(side="left")
+        ttk.Button(bar, text="Check voice",
+                   command=self.check_voice).pack(side="left", padx=8)
         self.sd_state = ttk.Label(bar, text="", style="Muted.TLabel")
         self.sd_state.pack(side="left", padx=12)
 
@@ -1061,6 +1069,17 @@ class App:
         self.log_text.configure(state="normal")
         self.log_text.delete("1.0", "end")
         self.log_text.configure(state="disabled")
+
+    def save_log(self):
+        path = filedialog.asksaveasfilename(
+            title="Save the console log", defaultextension=".txt",
+            initialfile="mosu-console.txt",
+            filetypes=[("Text", "*.txt"), ("All files", "*.*")])
+        if not path:
+            return
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(self.log_text.get("1.0", "end"))
+        self.set_status("Log saved to %s" % path, GREEN)
 
     def send_console(self):
         cmd = self.cmd_var.get().strip()
@@ -1319,6 +1338,50 @@ class App:
             self.root.after(0, self.push_done, ok, len(names))
 
         self.run_worker(work, "Pushing files...")
+
+    def check_voice(self):
+        script = os.path.join(ROOT, "tools", "check_voice.py")
+        if not os.path.isfile(script):
+            messagebox.showerror("MosuTime Manager", "tools/check_voice.py is missing.")
+            return
+
+        def work():
+            args = [sys.executable, script, SD_VOICE]
+            proc = subprocess.Popen(args, cwd=ROOT, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True,
+                                    encoding="utf-8", errors="replace",
+                                    bufsize=1)
+            for line in proc.stdout:
+                proc_line = line.rstrip("\r\n")
+                self.root.after(0, self._append_sd, proc_line)
+            code = proc.wait()
+            self.root.after(0, self._append_sd,
+                            "== %s ==" % ("PASS" if code == 0 else "FAIL"))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _append_sd(self, text):
+        self.sd_text.configure(state="normal")
+        self.sd_text.insert("end", text + "\n")
+        self.sd_text.see("end")
+        self.sd_text.configure(state="disabled")
+
+    def factory_reset(self):
+        if not self.device.open:
+            messagebox.showinfo("MosuTime Manager", "Connect to the watch first.")
+            return
+        if not messagebox.askyesno(
+                "MosuTime Manager",
+                "Erase the saved configuration and Wi-Fi calibration?\n\n"
+                "The SD card is not touched. The watch reboots and reloads "
+                "mosu.cfg from the card, or uses built-in defaults when there "
+                "is no card."):
+            return
+        if not messagebox.askyesno(
+                "MosuTime Manager",
+                "Last check: really erase NVS now?"):
+            return
+        self.quick("nvs erase")
 
     def push_done(self, ok, count):
         self.sd_state.configure(text="done" if ok else "failed",
