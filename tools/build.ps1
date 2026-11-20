@@ -12,6 +12,7 @@ param(
     [string]$Port = "",
     [switch]$Flash,
     [switch]$Monitor,
+    [switch]$MergeBin,
     [switch]$Clean
 )
 
@@ -58,6 +59,11 @@ try {
     }
     idf.py build
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+    if ($MergeBin) {
+        idf.py merge-bin
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
 
     if ($Flash) {
         if ($Port) {

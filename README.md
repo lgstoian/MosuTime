@@ -132,6 +132,11 @@ through `tools/build.ps1`; SD format and file push; and a shutdown button. It
 needs `pyserial` (`python -m pip install pyserial`) and the same ESP-IDF 5.5.x
 installation as the build script.
 
+A self-contained **MosuTimeManager.exe** (no Python) and the merged firmware
+image are attached to every GitHub release; see
+[`docs/release.md`](docs/release.md). Build one with
+`.\tools\release.ps1` after tagging.
+
 Edit the Wi-Fi network and brightness in `sd_card/mosu.cfg` (or pass `--ssid`
 and `--pass` to the push tool), generate the voice with the script below, then
 push both with `tools/push_sd.py` or the app's SD tab.

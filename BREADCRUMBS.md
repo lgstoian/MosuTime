@@ -120,6 +120,7 @@ replaces [`docs/bringup.md`](docs/bringup.md).
 | [`docs/power.md`](docs/power.md) | Power states, the current model, PPK2 measurement procedure, acceptance targets and open questions. |
 | [`docs/voice.md`](docs/voice.md) | The 78 clips, Romanian grammar, naming, generation, preview, replacement and licences. |
 | [`docs/maintenance.md`](docs/maintenance.md) | Editing `mosu.cfg`, runtime brightness/volume, changing networks, regenerating voice, USB updates, SD replacement, troubleshooting. |
+| [`docs/release.md`](docs/release.md) | Building and publishing releases: merged firmware image, manager exe, SD card zip, checksums. |
 | [`docs/family-ro.md`](docs/family-ro.md) | The one-page Romanian guide for the wearer and family. |
 | [`docs/accessibility/README.md`](docs/accessibility/README.md) | Physical size math, viewing distance, contrast and the generated contact sheet. |
 | [`docs/findings.md`](docs/findings.md) | Engineering log of issues found during emulator/desk testing, with symptom, cause, fix and file. |

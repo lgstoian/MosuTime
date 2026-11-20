@@ -100,6 +100,7 @@ python tools/mosu_gui.py                        # Windows manager app
 python tools/mosu_g2p.py --selftest             # check the pronunciation rules
 python tools/power_budget.py                    # first-order power model
 python tools/contact_sheet.py                   # docs/accessibility/hours.png
+.\tools\release.ps1                             # firmware + exe + SD zip
 ```
 
 ## Layer and dependency map

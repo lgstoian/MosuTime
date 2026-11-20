@@ -42,6 +42,11 @@ sd_card/voice/*.wav
 sd_card/logs/
 build.log
 
+# Releases and PyInstaller work
+release/
+dist/
+*.spec
+
 # Editors / OS
 .vscode/
 .idea/

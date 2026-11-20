@@ -19,6 +19,7 @@ so one cable is enough.  Run with:
 import os
 import queue
 import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -37,11 +38,39 @@ except ImportError:
         "pyserial is missing.\n\nRun: python -m pip install pyserial")
     raise SystemExit(2)
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BUILD_SCRIPT = os.path.join(ROOT, "tools", "build.ps1")
-SD_CFG = os.path.join(ROOT, "sd_card", "mosu.cfg")
-SD_VOICE = os.path.join(ROOT, "sd_card", "voice")
-BUILD_DIR = os.path.join(ROOT, "build")
+FROZEN = bool(getattr(sys, "frozen", False))
+APP_NAME = "MosuTime Manager"
+APP_VERSION = "1.0.0"
+
+
+def find_repo(start):
+    """Accept the exe next to, or two levels below, a MosuTime checkout."""
+    here = os.path.abspath(start)
+    for candidate in (here, os.path.dirname(here), os.path.dirname(
+            os.path.dirname(here))):
+        if os.path.isfile(os.path.join(candidate, "tools", "build.ps1")):
+            return candidate
+    return None
+
+
+if FROZEN:
+    RES_DIR = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+    APP_DIR = os.path.dirname(sys.executable)
+    DATA_DIR = os.path.join(
+        os.environ.get("LOCALAPPDATA") or APP_DIR, "MosuTime")
+    os.makedirs(DATA_DIR, exist_ok=True)
+    ROOT = find_repo(APP_DIR)
+    SD_CFG = os.path.join(DATA_DIR, "mosu.cfg")
+    if not os.path.isfile(SD_CFG):
+        shutil.copyfile(os.path.join(RES_DIR, "sd_card", "mosu.cfg"), SD_CFG)
+    SD_VOICE = os.path.join(RES_DIR, "sd_card", "voice")
+else:
+    ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    SD_CFG = os.path.join(ROOT, "sd_card", "mosu.cfg")
+    SD_VOICE = os.path.join(ROOT, "sd_card", "voice")
+
+BUILD_SCRIPT = os.path.join(ROOT, "tools", "build.ps1") if ROOT else None
+BUILD_DIR = os.path.join(ROOT, "build") if ROOT else None
 
 BG = "#14161a"
 PANEL = "#1c1f25"
@@ -390,6 +419,85 @@ def format_value(field, value):
     return str(value)
 
 
+def push_file(device, log, target, data, label):
+    """ACK-paced 4 KB upload with a CRC trailer; returns True on RX DONE."""
+    device.send("receive %s %d /crc" % (target, len(data)))
+    if not device.wait_line(READY, 15):
+        log("!! no READY for %s" % label)
+        return False
+    sent = 0
+    while sent < len(data):
+        chunk = data[sent:sent + CHUNK]
+        device.write(chunk)
+        sent += len(chunk)
+        line = device.read_line(8.0)
+        while line is not None and not line.startswith("RX "):
+            if line.startswith("receive:"):
+                return False
+            line = device.read_line(8.0)
+        if line is None:
+            log("!! no ACK for %s at %d" % (label, sent))
+            return False
+        if int(line[3:]) != sent:
+            log("!! bad ACK for %s" % label)
+            return False
+    device.write(struct.pack("<I", zlib.crc32(data) & 0xFFFFFFFF))
+    return device.wait_line(DONE, 20)
+
+
+def esptool_flash(port, image, emit):
+    """Write a merged image at 0x0 through the esptool bundled in the app."""
+    try:
+        import esptool
+    except ImportError:
+        emit("esptool is not bundled in this build")
+        return False
+    argv = [
+        "--chip", "esp32s3", "-p", port, "-b", "460800",
+        "--before", "default_reset", "--after", "hard_reset",
+        "write_flash", "--flash_mode", "dio", "--flash_freq", "80m",
+        "--flash_size", "32MB", "0x0", image,
+    ]
+    emit("$ esptool " + " ".join(argv))
+
+    class Sink:
+        def __init__(self):
+            self.pending = ""
+
+        def write(self, text):
+            self.pending += text
+            while True:
+                marks = [i for i in (self.pending.find("\n"),
+                                     self.pending.find("\r")) if i >= 0]
+                if not marks:
+                    break
+                cut = min(marks)
+                line, self.pending = self.pending[:cut], self.pending[cut + 1:]
+                if line.strip():
+                    emit(line.rstrip())
+
+        def flush(self):
+            if self.pending.strip():
+                emit(self.pending.rstrip())
+            self.pending = ""
+
+    sink = Sink()
+    old_out, old_err = sys.stdout, sys.stderr
+    sys.stdout = sys.stderr = sink
+    ok = False
+    try:
+        esptool.main(argv)
+        ok = True
+    except SystemExit as exc:
+        ok = exc.code in (0, None)
+    except Exception as exc:  # noqa: BLE001 - esptool raises broadly
+        emit("!! %s" % exc)
+    finally:
+        sink.flush()
+        sys.stdout, sys.stderr = old_out, old_err
+    return ok
+
+
 class App:
     def __init__(self, root):
         self.root = root
@@ -399,7 +507,7 @@ class App:
         self.worker = None
         self.info = {}
 
-        root.title("MosuTime Manager")
+        root.title("%s %s" % (APP_NAME, APP_VERSION))
         root.geometry("980x720")
         root.minsize(820, 600)
         root.configure(bg=BG)
@@ -851,22 +959,29 @@ class App:
             self.quick("reboot")
 
     def build_firmware(self):
-        intro = ttk.Label(
-            self.tab_firmware,
-            text="Builds and flashes through tools/build.ps1, the same path as "
-                 "the command line.\nFlashing needs the watch on the selected "
-                 "port; NVS and the SD card are kept.",
-            style="Muted.TLabel", justify="left")
-        intro.pack(anchor="w", pady=(0, 10))
+        if BUILD_SCRIPT:
+            intro = ("Builds and flashes through tools/build.ps1, the same "
+                     "path as the command line.\nFlashing needs the watch on "
+                     "the selected port; NVS and the SD card are kept.")
+        else:
+            intro = ("This copy has no firmware build tree next to it. Use "
+                     "**Flash image** with the merged .bin from a release; "
+                     "NVS and the SD card are kept.")
+        ttk.Label(self.tab_firmware, text=intro, style="Muted.TLabel",
+                  justify="left").pack(anchor="w", pady=(0, 10))
 
         bar = ttk.Frame(self.tab_firmware)
         bar.pack(fill="x", pady=(0, 8))
-        ttk.Button(bar, text="Build", command=self.build_only).pack(
-            side="left")
-        ttk.Button(bar, text="Build and flash", style="Accent.TButton",
-                   command=self.build_flash).pack(side="left", padx=8)
-        ttk.Button(bar, text="Open build folder",
-                   command=self.open_build).pack(side="left")
+        if BUILD_SCRIPT:
+            ttk.Button(bar, text="Build", command=self.build_only).pack(
+                side="left")
+            ttk.Button(bar, text="Build and flash", style="Accent.TButton",
+                       command=self.build_flash).pack(side="left", padx=8)
+        ttk.Button(bar, text="Flash image...", style="Accent.TButton",
+                   command=self.flash_image).pack(side="left")
+        if BUILD_DIR:
+            ttk.Button(bar, text="Open build folder",
+                       command=self.open_build).pack(side="left", padx=8)
         ttk.Button(bar, text="Factory reset (NVS)", style="Danger.TButton",
                    command=self.factory_reset).pack(side="left", padx=8)
         self.fw_state = ttk.Label(bar, text="", style="Muted.TLabel")
@@ -1271,6 +1386,69 @@ class App:
             self.refresh_ports()
         self.toggle_connect()
 
+    # ------------------------------------------------------------------ flash
+
+    def flash_image(self):
+        port = self.current_port()
+        if not port:
+            self.refresh_ports()
+            port = self.current_port()
+        if not port:
+            messagebox.showinfo("MosuTime Manager", "No serial port selected.")
+            return
+        image = filedialog.askopenfilename(
+            title="Merged firmware image",
+            filetypes=[("Firmware image", "*.bin"), ("All files", "*.*")])
+        if not image:
+            return
+        if not messagebox.askyesno(
+                "MosuTime Manager",
+                "Flash\n\n%s\n\nto %s?\n\nThe watch restarts. NVS and the SD "
+                "card are kept." % (os.path.basename(image), port)):
+            return
+        self.start_flash(port, image)
+
+    def start_flash(self, port, image):
+        if self.device.busy:
+            messagebox.showinfo("MosuTime Manager",
+                                "An operation is already running.")
+            return
+        was_open = self.device.open
+        if was_open:
+            self.device.close()
+            self.connect_btn.configure(text="Connect")
+            self.dot.itemconfigure(self.dot_id, fill="#555b64")
+        self.device.busy = True
+        self.set_status("Flashing %s..." % os.path.basename(image), ACCENT)
+        self.fw_state.configure(text="flashing", foreground=ACCENT)
+        self.progress.configure(mode="indeterminate")
+        self.progress.start(12)
+        self.tabs.select(self.tab_firmware)
+
+        def work():
+            ok = self.run_esptool(port, image)
+            self.root.after(0, self.flash_done, ok, was_open)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def run_esptool(self, port, image):
+        return esptool_flash(port, image, self.append_fw)
+
+    def flash_done(self, ok, was_open):
+        self.device.busy = False
+        self.progress.stop()
+        self.progress.configure(mode="determinate", value=0)
+        self.fw_state.configure(text="flash: %s" % ("ok" if ok else "failed"),
+                                foreground=GREEN if ok else RED)
+        self.set_status("Flash finished" if ok else "Flash failed",
+                        GREEN if ok else RED)
+        if ok:
+            if was_open:
+                self.root.after(1200, self.reconnect)
+        else:
+            messagebox.showerror("MosuTime Manager",
+                                 "Flashing failed. See the log.")
+
     # ---------------------------------------------------------------- sd card
 
     def format_card(self):
@@ -1390,28 +1568,7 @@ class App:
             self.quick("ls /sdcard/voice")
 
     def push_file(self, target, data, label):
-        self.device.send("receive %s %d /crc" % (target, len(data)))
-        if not self.device.wait_line(READY, 15):
-            self.log("!! no READY for %s" % label)
-            return False
-        sent = 0
-        while sent < len(data):
-            chunk = data[sent:sent + CHUNK]
-            self.device.write(chunk)
-            sent += len(chunk)
-            line = self.device.read_line(8.0)
-            while line is not None and not line.startswith("RX "):
-                if line.startswith("receive:"):
-                    return False
-                line = self.device.read_line(8.0)
-            if line is None:
-                self.log("!! no ACK for %s at %d" % (label, sent))
-                return False
-            if int(line[3:]) != sent:
-                self.log("!! bad ACK for %s" % label)
-                return False
-        self.device.write(struct.pack("<I", zlib.crc32(data) & 0xFFFFFFFF))
-        return self.device.wait_line(DONE, 20)
+        return push_file(self.device, self.log, target, data, label)
 
     # ------------------------------------------------------------------ power
 
@@ -1461,10 +1618,121 @@ def selftest():
     print("selftest: OK")
 
 
+def autotest(port, log_path=None, image=None):
+    """Talk to the watch and exercise the same code the buttons use."""
+    lines = []
+
+    def say(text):
+        lines.append(text)
+        if sys.stdout is not None:
+            try:
+                print(text, flush=True)
+            except Exception:
+                pass
+
+    def finish(ok):
+        say("AUTOTEST %s" % ("PASS" if ok else "FAIL"))
+        if log_path:
+            with open(log_path, "w", encoding="utf-8") as handle:
+                handle.write("\n".join(lines) + "\n")
+        return 0 if ok else 1
+
+    dev = Device(say)
+    ok = True
+    try:
+        say("port: %s" % port)
+        dev.open_port(port)
+        time.sleep(1.5)
+        shell = False
+        for _ in range(10):
+            dev.send("help")
+            if dev.wait_line("commands:", 0.8):
+                shell = True
+                break
+        say("connect: %s" % ("PASS" if shell else "FAIL"))
+        ok &= shell
+        if not shell:
+            return finish(ok)
+
+        dev.send("version")
+        version = dev.capture(0.9)
+        app = next((l for l in version if l.startswith("app    :")), "")
+        say("version: %s (%s)" % ("PASS" if "MosuTime" in app else "FAIL", app))
+
+        dev.send("status")
+        status = dev.capture(1.1)
+        power = next((l for l in status if l.startswith("power  :")), "")
+        say("status: %s (%s)" % ("PASS" if "mV" in power else "FAIL", power))
+        ok &= "mV" in power
+
+        dev.send("pmu")
+        pmu = dev.capture(0.9)
+        battery = next((l for l in pmu if "battery" in l), "")
+        say("pmu: %s (%s)" % ("PASS" if "battery" in battery else "FAIL",
+                              battery))
+        ok &= "battery" in battery
+
+        cfg = ConfigFile(SD_CFG)
+        original = cfg.get("display", "brightness")
+        cfg.set("display", "brightness", original)
+        cfg.save()
+        say("settings round-trip: PASS (%s)" % SD_CFG)
+
+        with open(SD_CFG, "rb") as handle:
+            data = handle.read()
+        pushed = push_file(dev, say, "/sdcard/mosu.cfg", data, "mosu.cfg")
+        say("push config: %s (%d bytes)" % ("PASS" if pushed else "FAIL",
+                                            len(data)))
+        ok &= pushed
+
+        dev.send("ls /sdcard")
+        listing = dev.capture(1.0)
+        listed = any("mosu.cfg" in line for line in listing)
+        say("list card: %s" % ("PASS" if listed else "FAIL"))
+        ok &= listed
+
+        dev.send("ls /sdcard/voice")
+        clips = dev.capture(1.0)
+        count = next((l for l in clips if "entries" in l), "?")
+        say("voice folder: %s" % count)
+
+        if image:
+            dev.close()
+            time.sleep(0.5)
+            say("flashing %s" % image)
+            flashed = esptool_flash(port, image, say)
+            say("flash: %s" % ("PASS" if flashed else "FAIL"))
+            ok &= flashed
+            time.sleep(2.0)
+            dev.open_port(port)
+            time.sleep(1.5)
+            back = False
+            for _ in range(12):
+                dev.send("help")
+                if dev.wait_line("commands:", 1.0):
+                    back = True
+                    break
+            say("boot after flash: %s" % ("PASS" if back else "FAIL"))
+            ok &= back
+    except Exception as exc:  # noqa: BLE001 - report and fail the run
+        say("!! %s" % exc)
+        ok = False
+    finally:
+        dev.close()
+    return finish(ok)
+
+
 def main():
-    if "--selftest" in sys.argv:
+    args = sys.argv[1:]
+    if "--selftest" in args:
         selftest()
         return 0
+    if "--autotest" in args:
+        index = args.index("--autotest")
+        port = args[index + 1] if index + 1 < len(args) else "COM11"
+        log_path = args[args.index("--log") + 1] if "--log" in args else None
+        image = args[args.index("--flash") + 1] if "--flash" in args else None
+        return autotest(port, log_path, image)
     root = tk.Tk()
     app = App(root)
     root.protocol("WM_DELETE_WINDOW", app.on_close)
