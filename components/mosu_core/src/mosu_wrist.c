@@ -66,7 +66,6 @@ void mosu_wrist_reset(mosu_wrist_t *wrist)
     wrist->have_candidate = false;
     wrist->moving = false;
     wrist->candidate_ms = 0;
-    wrist->last_event_ms = 0;
     wrist->still_ms = 0;
     wrist->last_ms = 0;
 }
