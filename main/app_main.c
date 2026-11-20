@@ -257,8 +257,9 @@ static void screen_off(void)
         lvgl_port_stop();
         s_lvgl_stopped = true;
         /* Let an in-flight QSPI flush finish before the panel is switched
-         * off and put to sleep. */
-        vTaskDelay(pdMS_TO_TICKS(30));
+         * off and put to sleep.  A full frame is ~411 KB, so 80 ms is the
+         * safe side of the transfer time. */
+        vTaskDelay(pdMS_TO_TICKS(80));
     }
     if (s_display_ok) {
         mosu_board_display_off();
