@@ -273,6 +273,33 @@ static void test_power_learn(void)
     EXPECT(learn.angle_bonus < MOSU_POWER_ANGLE_MAX);
 }
 
+static void test_power_loosen(void)
+{
+    mosu_power_learn_t learn;
+    mosu_power_learn_init(&learn);
+
+    /* One hour with a touch wake and no raise: the gates were too strict. */
+    mosu_power_learn_note(&learn, 3600000, false);
+    mosu_power_learn_wake(&learn, true);
+    EXPECT(mosu_power_learn_tick(&learn, 3600000));
+    EXPECT(learn.angle_loosen > 0);
+    EXPECT(mosu_power_learn_angle(&learn, 45) < 45);
+    EXPECT(mosu_power_learn_hold(&learn, 250) < 250);
+    EXPECT(mosu_power_learn_still(&learn, 600) < 600);
+    EXPECT(mosu_power_learn_face(&learn, 200) < 200);
+
+    /* The loosening has a floor; it can never disable the gesture. */
+    for (int i = 0; i < 20; i++) {
+        mosu_power_learn_note(&learn, 3600000, false);
+        mosu_power_learn_wake(&learn, true);
+        mosu_power_learn_tick(&learn, 3600000);
+    }
+    EXPECT(mosu_power_learn_angle(&learn, 45) >= 25);
+    EXPECT(mosu_power_learn_hold(&learn, 250) >= 150);
+    EXPECT(mosu_power_learn_still(&learn, 600) >= 250);
+    EXPECT(mosu_power_learn_face(&learn, 200) >= 100);
+}
+
 void test_policy(void)
 {
     test_offsets();
@@ -282,4 +309,5 @@ void test_policy(void)
     test_backoff();
     test_wifi_learn();
     test_power_learn();
+    test_power_loosen();
 }

@@ -169,29 +169,25 @@ static void test_tap(void)
 
 static void test_wrist(void)
 {
-    mosu_wrist_cfg_t cfg = {.angle_mdeg = 60000, .refractory_ms = 2500};
+    mosu_wrist_cfg_t cfg = {.angle_mdeg = 45000, .refractory_ms = 2500};
     mosu_wrist_t wrist;
     mosu_wrist_init(&wrist);
 
     mosu_accel_t down = {0.0f, 1.0f, 0.0f};   /* arm down, glass vertical */
     mosu_accel_t up = {0.0f, 0.0f, 1.0f};     /* glass towards the wearer */
 
-    /* Settle for longer than the still-before window, then raise. */
+    /* Settle for the default 600 ms, then raise. */
     EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 1000));
     EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 1300));
     EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 1600));
-    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 1900));
-    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 2200));
-    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 2500));
-    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 2800));
 
-    /* The new orientation has to hold for the full 400 ms. */
-    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 2900));
-    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 3200));
-    EXPECT(mosu_wrist_update(&wrist, &up, &cfg, 3400));
+    /* The new orientation has to hold for the default 250 ms. */
+    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 1700));
+    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 1850));
+    EXPECT(mosu_wrist_update(&wrist, &up, &cfg, 1950));
 
     /* Holding the new orientation does not retrigger. */
-    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 4200));
+    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 3000));
     EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 9000));
 
     /* A raise that starts while the arm is still moving is ignored. */
@@ -211,10 +207,23 @@ static void test_wrist(void)
     EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 1900));
     EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 2200));
     EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 2500));
-    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 2800));
-    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 2900));
-    EXPECT(mosu_wrist_update(&wrist, &up, &cfg, 3400));
-    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 3600));
+    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 2600));
+    EXPECT(mosu_wrist_update(&wrist, &up, &cfg, 2850));
+    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 3000));
+
+    /* An explicit, looser configuration is honoured at runtime. */
+    mosu_wrist_cfg_t loose = {
+        .angle_mdeg = 25000,
+        .refractory_ms = 2500,
+        .hold_ms = 150,
+        .still_before_ms = 250,
+        .face_up_milli = 100,
+    };
+    mosu_wrist_init(&wrist);
+    EXPECT(!mosu_wrist_update(&wrist, &down, &loose, 1000));
+    EXPECT(!mosu_wrist_update(&wrist, &down, &loose, 1300));
+    EXPECT(!mosu_wrist_update(&wrist, &up, &loose, 1400));
+    EXPECT(mosu_wrist_update(&wrist, &up, &loose, 1550));
 }
 
 static void test_config(void)

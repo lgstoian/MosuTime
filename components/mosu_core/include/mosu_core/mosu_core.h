@@ -143,8 +143,12 @@ typedef struct {
 } mosu_accel_t;
 
 typedef struct {
-    uint16_t angle_mdeg;  /* orientation change that counts as a raise */
+    uint16_t angle_mdeg;       /* orientation change that counts as a raise */
     uint16_t refractory_ms;
+    /* Adaptive gates; 0 selects the built-in default. */
+    uint16_t hold_ms;          /* how long the new orientation must hold */
+    uint16_t still_before_ms;  /* settled time required before the movement */
+    uint16_t face_up_milli;    /* |gz| * 1000 that counts as facing the wearer */
 } mosu_wrist_cfg_t;
 
 typedef struct {

@@ -472,8 +472,11 @@ static void handle_line(char *line)
         printf("power : %u mV, %u%%, charging %d, boot %u%%\n",
                (unsigned)stats.battery_mv, (unsigned)stats.battery_pct,
                (int)stats.charging, (unsigned)stats.boot_pct);
-        printf("auto  : screen %u s, raise angle %u deg\n",
-               (unsigned)(stats.screen_ms / 1000u), (unsigned)stats.angle_deg);
+        printf("auto  : screen %u s, raise %u deg/%u ms, still %u ms, "
+               "face %u/1000\n",
+               (unsigned)(stats.screen_ms / 1000u), (unsigned)stats.angle_deg,
+               (unsigned)stats.hold_ms, (unsigned)stats.still_ms,
+               (unsigned)stats.face_milli);
         if (!stats.charging && stats.battery_present && stats.uptime_s > 600 &&
             stats.boot_pct > stats.battery_pct) {
             const unsigned used = stats.boot_pct - stats.battery_pct;

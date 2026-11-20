@@ -119,9 +119,17 @@ uint32_t mosu_wifi_learn_scan_s(const mosu_wifi_learn_t *learn, uint8_t hour);
 typedef struct {
     uint8_t angle_bonus;    /* degrees above the configured angle, 0..14 */
     uint16_t screen_cut_ms; /* milliseconds below screen_on_ms, 0..7000 */
+    /* Loosening, learned when the wearer touches to wake but the raise never
+     * fires: the gesture gates were too strict for this arm. */
+    uint8_t angle_loosen;   /* degrees below the configured angle, 0..30 */
+    uint8_t face_loosen;    /* 0.05 steps below the face-up gate, 0..6 */
+    uint16_t still_loosen_ms;
+    uint16_t hold_loosen_ms;
     uint32_t window_ms;     /* time accumulated in this window */
     uint32_t screen_ms;     /* lit time in this window */
     uint32_t wakes;         /* screen turns in this window */
+    uint16_t wakes_motion;
+    uint16_t wakes_touch;
     uint8_t calm_hours;
     uint32_t since_change_ms;
     bool was_on;
@@ -131,12 +139,20 @@ void mosu_power_learn_init(mosu_power_learn_t *learn);
 /* dt_ms since the previous call; screen_on is the current panel state. */
 void mosu_power_learn_note(mosu_power_learn_t *learn, uint32_t dt_ms,
                            bool screen_on);
+/* Record who woke the face: a touch means the raise did not. */
+void mosu_power_learn_wake(mosu_power_learn_t *learn, bool via_touch);
 /* Close a window (normally one hour); true when the offsets changed. */
 bool mosu_power_learn_tick(mosu_power_learn_t *learn, uint32_t window_ms);
 uint16_t mosu_power_learn_angle(const mosu_power_learn_t *learn,
                                 uint16_t base_deg);
 uint32_t mosu_power_learn_screen_ms(const mosu_power_learn_t *learn,
                                     uint32_t base_ms);
+uint16_t mosu_power_learn_hold(const mosu_power_learn_t *learn,
+                               uint16_t base_ms);
+uint16_t mosu_power_learn_still(const mosu_power_learn_t *learn,
+                                uint16_t base_ms);
+uint16_t mosu_power_learn_face(const mosu_power_learn_t *learn,
+                               uint16_t base_milli);
 
 #ifdef __cplusplus
 }

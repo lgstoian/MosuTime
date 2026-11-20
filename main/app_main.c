@@ -229,6 +229,7 @@ static void screen_on(bool via_touch)
     taskEXIT_CRITICAL(&s_session_mux);
     s_wake_count++;
     s_screen_on_since_ms = now_ms();
+    mosu_power_learn_wake(&s_power_learn, via_touch);
 
     ESP_LOGI(TAG, "screen on (%s)", via_touch ? "touch" : "motion");
 }
@@ -398,6 +399,10 @@ static void apply_power_learning(void)
     uint16_t angle = mosu_power_learn_angle(&s_power_learn,
                                             s_cfg.display.motion_angle_deg);
     s_wrist_cfg.angle_mdeg = angle * 1000u;
+    s_wrist_cfg.hold_ms = mosu_power_learn_hold(&s_power_learn, 250);
+    s_wrist_cfg.still_before_ms =
+        mosu_power_learn_still(&s_power_learn, 600);
+    s_wrist_cfg.face_up_milli = mosu_power_learn_face(&s_power_learn, 200);
 
     uint32_t screen =
         mosu_power_learn_screen_ms(&s_power_learn, s_cfg.display.screen_on_ms);
@@ -405,9 +410,11 @@ static void apply_power_learning(void)
     mosu_session_set_screen_on_ms(&s_session, screen);
     taskEXIT_CRITICAL(&s_session_mux);
 
-    ESP_LOGI(TAG, "auto power: angle %u deg, screen %u ms (bonus +%u, cut %u)",
-             (unsigned)angle, (unsigned)screen, s_power_learn.angle_bonus,
-             (unsigned)s_power_learn.screen_cut_ms);
+    ESP_LOGI(TAG, "auto power: raise %u deg/%u ms, still %u ms, face %u, "
+             "screen %u ms",
+             (unsigned)angle, (unsigned)s_wrist_cfg.hold_ms,
+             (unsigned)s_wrist_cfg.still_before_ms,
+             (unsigned)s_wrist_cfg.face_up_milli, (unsigned)screen);
 }
 
 static void diag_stats(mosu_diag_stats_t *out)
@@ -437,6 +444,9 @@ static void diag_stats(mosu_diag_stats_t *out)
     out->screen_on_s = on_ms / 1000u;
     out->screen_ms = mosu_power_learn_screen_ms(&s_power_learn,
                                                 s_cfg.display.screen_on_ms);
+    out->hold_ms = mosu_power_learn_hold(&s_power_learn, 250);
+    out->still_ms = mosu_power_learn_still(&s_power_learn, 600);
+    out->face_milli = mosu_power_learn_face(&s_power_learn, 200);
     out->angle_deg = (uint8_t)mosu_power_learn_angle(
         &s_power_learn, s_cfg.display.motion_angle_deg);
 

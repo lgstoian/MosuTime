@@ -13,11 +13,11 @@
 
 #include "mosu_core/mosu_core.h"
 
-#define MOSU_WRIST_HOLD_MS 400
+#define MOSU_WRIST_HOLD_MS 250
 #define MOSU_WRIST_HOLD_DEG 20.0f
 #define MOSU_WRIST_STILL_DEG 12.0f
-#define MOSU_WRIST_STILL_BEFORE_MS 1500
-#define MOSU_WRIST_FACE_UP_MIN 0.45f
+#define MOSU_WRIST_STILL_BEFORE_MS 600
+#define MOSU_WRIST_FACE_UP_MIN 0.20f
 #define MOSU_WRIST_BASELINE_ALPHA 0.05f
 #define MOSU_RAD_TO_DEG 57.2957795f
 
@@ -95,6 +95,12 @@ bool mosu_wrist_update(mosu_wrist_t *wrist, const mosu_accel_t *accel,
         (uint32_t)(now_ms - wrist->last_event_ms) < cfg->refractory_ms;
 
     float threshold = (float)cfg->angle_mdeg / 1000.0f;
+    const uint32_t hold_ms = cfg->hold_ms ? cfg->hold_ms : MOSU_WRIST_HOLD_MS;
+    const uint32_t still_before_ms =
+        cfg->still_before_ms ? cfg->still_before_ms : MOSU_WRIST_STILL_BEFORE_MS;
+    const float face_up_min = cfg->face_up_milli
+                                  ? (float)cfg->face_up_milli / 1000.0f
+                                  : MOSU_WRIST_FACE_UP_MIN;
     float from_baseline =
         angle_between(nx, ny, nz, wrist->bx, wrist->by, wrist->bz);
 
@@ -112,7 +118,7 @@ bool mosu_wrist_update(mosu_wrist_t *wrist, const mosu_accel_t *accel,
 
     if (!wrist->have_candidate) {
         if (!refractory && from_baseline >= threshold &&
-            still_before >= MOSU_WRIST_STILL_BEFORE_MS) {
+            still_before >= still_before_ms) {
             wrist->have_candidate = true;
             wrist->cx = nx;
             wrist->cy = ny;
@@ -142,8 +148,8 @@ bool mosu_wrist_update(mosu_wrist_t *wrist, const mosu_accel_t *accel,
          * gravity vector ends up along the screen normal.  Reaching for an
          * object can rotate the wrist just as far but keeps the face
          * vertical, so this is what separates a glance from a gesture. */
-        if ((uint32_t)(now_ms - wrist->candidate_ms) >= MOSU_WRIST_HOLD_MS &&
-            !refractory && fabsf(nz) >= MOSU_WRIST_FACE_UP_MIN) {
+        if ((uint32_t)(now_ms - wrist->candidate_ms) >= hold_ms &&
+            !refractory && fabsf(nz) >= face_up_min) {
             /* The new orientation held: this is a raise. */
             wrist->bx = wrist->cx;
             wrist->by = wrist->cy;

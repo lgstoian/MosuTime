@@ -434,6 +434,20 @@ void mosu_power_learn_note(mosu_power_learn_t *learn, uint32_t dt_ms,
     learn->was_on = screen_on;
 }
 
+void mosu_power_learn_wake(mosu_power_learn_t *learn, bool via_touch)
+{
+    if (!learn) {
+        return;
+    }
+    if (via_touch) {
+        if (learn->wakes_touch < UINT16_MAX) {
+            learn->wakes_touch++;
+        }
+    } else if (learn->wakes_motion < UINT16_MAX) {
+        learn->wakes_motion++;
+    }
+}
+
 bool mosu_power_learn_tick(mosu_power_learn_t *learn, uint32_t window_ms)
 {
     if (!learn || learn->window_ms == 0) {
@@ -447,21 +461,70 @@ bool mosu_power_learn_tick(mosu_power_learn_t *learn, uint32_t window_ms)
 
     learn->since_change_ms += elapsed;
 
-    if ((duty_per_mille >= 120u || learn->wakes >= 10u) &&
-        learn->since_change_ms >= 3u * 3600u * 1000u) {
-        uint8_t bonus = (uint8_t)(learn->angle_bonus + 2u);
-        if (bonus > MOSU_POWER_ANGLE_MAX) {
-            bonus = MOSU_POWER_ANGLE_MAX;
+    /* The wearer touched the glass but the raise never fired: the gates are
+     * too strict for this arm.  Loosen them one step at a time. */
+    const bool touch_to_wake =
+        learn->wakes_motion == 0 && learn->wakes_touch > 0;
+    if (touch_to_wake && learn->since_change_ms >= 3600u * 1000u) {
+        uint8_t angle = (uint8_t)(learn->angle_loosen + 4u);
+        uint8_t face = (uint8_t)(learn->face_loosen + 1u);
+        uint16_t still = (uint16_t)(learn->still_loosen_ms + 250u);
+        uint16_t hold = (uint16_t)(learn->hold_loosen_ms + 50u);
+        if (angle > 30u) {
+            angle = 30u;
         }
-        uint16_t cut = (uint16_t)(learn->screen_cut_ms + 1000u);
-        if (cut > MOSU_POWER_CUT_MAX_MS) {
-            cut = MOSU_POWER_CUT_MAX_MS;
+        if (face > 6u) {
+            face = 6u;
         }
-        changed = bonus != learn->angle_bonus || cut != learn->screen_cut_ms;
-        learn->angle_bonus = bonus;
-        learn->screen_cut_ms = cut;
+        if (still > 1100u) {
+            still = 1100u;
+        }
+        if (hold > 200u) {
+            hold = 200u;
+        }
+        changed = angle != learn->angle_loosen ||
+                  face != learn->face_loosen ||
+                  still != learn->still_loosen_ms ||
+                  hold != learn->hold_loosen_ms;
+        learn->angle_loosen = angle;
+        learn->face_loosen = face;
+        learn->still_loosen_ms = still;
+        learn->hold_loosen_ms = hold;
         learn->calm_hours = 0;
         learn->since_change_ms = 0;
+    } else if ((duty_per_mille >= 120u || learn->wakes >= 10u) &&
+               learn->since_change_ms >= 2u * 3600u * 1000u) {
+        /* Too many wakes: take back the loosening first, then raise the
+         * configured threshold and shorten the lit window. */
+        if (learn->angle_loosen > 0 || learn->face_loosen > 0 ||
+            learn->still_loosen_ms > 0 || learn->hold_loosen_ms > 0) {
+            learn->angle_loosen =
+                learn->angle_loosen > 4 ? (uint8_t)(learn->angle_loosen - 4) : 0;
+            learn->face_loosen =
+                learn->face_loosen > 1 ? (uint8_t)(learn->face_loosen - 1) : 0;
+            learn->still_loosen_ms =
+                learn->still_loosen_ms > 250
+                    ? (uint16_t)(learn->still_loosen_ms - 250)
+                    : 0;
+            learn->hold_loosen_ms =
+                learn->hold_loosen_ms > 50
+                    ? (uint16_t)(learn->hold_loosen_ms - 50)
+                    : 0;
+        } else {
+            uint8_t bonus = (uint8_t)(learn->angle_bonus + 2u);
+            if (bonus > MOSU_POWER_ANGLE_MAX) {
+                bonus = MOSU_POWER_ANGLE_MAX;
+            }
+            uint16_t cut = (uint16_t)(learn->screen_cut_ms + 1000u);
+            if (cut > MOSU_POWER_CUT_MAX_MS) {
+                cut = MOSU_POWER_CUT_MAX_MS;
+            }
+            learn->angle_bonus = bonus;
+            learn->screen_cut_ms = cut;
+        }
+        learn->calm_hours = 0;
+        learn->since_change_ms = 0;
+        changed = true;
     } else if (duty_per_mille <= 30u && learn->wakes <= 3u) {
         if (learn->calm_hours < UINT8_MAX) {
             learn->calm_hours++;
@@ -487,6 +550,8 @@ bool mosu_power_learn_tick(mosu_power_learn_t *learn, uint32_t window_ms)
     learn->window_ms = 0;
     learn->screen_ms = 0;
     learn->wakes = 0;
+    learn->wakes_motion = 0;
+    learn->wakes_touch = 0;
     (void)window_ms;
     return changed;
 }
@@ -494,11 +559,55 @@ bool mosu_power_learn_tick(mosu_power_learn_t *learn, uint32_t window_ms)
 uint16_t mosu_power_learn_angle(const mosu_power_learn_t *learn,
                                 uint16_t base_deg)
 {
-    uint32_t angle = base_deg;
+    int32_t angle = base_deg;
     if (learn) {
         angle += learn->angle_bonus;
+        angle -= learn->angle_loosen;
     }
-    return angle > 80u ? 80u : (uint16_t)angle;
+    if (angle < 25) {
+        angle = 25;
+    }
+    return angle > 80 ? 80 : (uint16_t)angle;
+}
+
+uint16_t mosu_power_learn_hold(const mosu_power_learn_t *learn,
+                               uint16_t base_ms)
+{
+    if (!learn) {
+        return base_ms;
+    }
+    if (base_ms <= learn->hold_loosen_ms) {
+        return 150;
+    }
+    const uint16_t result = (uint16_t)(base_ms - learn->hold_loosen_ms);
+    return result < 150 ? 150 : result;
+}
+
+uint16_t mosu_power_learn_still(const mosu_power_learn_t *learn,
+                                uint16_t base_ms)
+{
+    if (!learn) {
+        return base_ms;
+    }
+    if (base_ms <= learn->still_loosen_ms) {
+        return 250;
+    }
+    const uint16_t result = (uint16_t)(base_ms - learn->still_loosen_ms);
+    return result < 250 ? 250 : result;
+}
+
+uint16_t mosu_power_learn_face(const mosu_power_learn_t *learn,
+                               uint16_t base_milli)
+{
+    if (!learn) {
+        return base_milli;
+    }
+    const uint16_t cut = (uint16_t)(learn->face_loosen * 50u);
+    if (base_milli <= cut) {
+        return 100;
+    }
+    const uint16_t result = (uint16_t)(base_milli - cut);
+    return result < 100 ? 100 : result;
 }
 
 uint32_t mosu_power_learn_screen_ms(const mosu_power_learn_t *learn,
