@@ -36,6 +36,7 @@ For the product constraints and the rules of the road, read
 | Change the IANA-to-POSIX timezone table or fallback | [`components/mosu_time/src/mosu_time.c`](components/mosu_time/src/mosu_time.c), [`components/mosu_policy/src/mosu_policy.c`](components/mosu_policy/src/mosu_policy.c) |
 | Change announcement queueing or clip gaps | [`components/mosu_audio/src/mosu_audio.c`](components/mosu_audio/src/mosu_audio.c) |
 | Add or change a maintenance-console command | [`components/mosu_diag/src/mosu_diag.c`](components/mosu_diag/src/mosu_diag.c), hooks in [`main/app_main.c`](main/app_main.c) |
+| Format the SD card or push files onto it over USB | `python tools/push_sd.py COM11 --format`, then `sd format yes`, `receive <path> <size> /crc`, `md`, `ls`, `rm`, `rx bench` in [`components/mosu_diag/src/mosu_diag.c`](components/mosu_diag/src/mosu_diag.c) |
 | Test without the watch | [`test/host`](test/host), [`sim/mosu_sim.c`](sim/mosu_sim.c), [`tools/emu/README.md`](tools/emu/README.md) |
 | Reproduce a touch or wrist gesture in the emulator | [`tools/emu/smoke.sh`](tools/emu/smoke.sh), [`tools/emu/board-interactive.json`](tools/emu/board-interactive.json) |
 | Capture the real firmware's face as a PNG | [`tools/emu/capture.sh`](tools/emu/capture.sh), [`tools/emu/reconstruct.py`](tools/emu/reconstruct.py) |
@@ -62,7 +63,7 @@ For the product constraints and the rules of the road, read
 | `mosu_net` | Wi-Fi association, HTTP (or HTTPS) geolocation, SNTP and switching the radio off again. Runs in its own task so the UI never blocks. | [`include/mosu_net.h`](components/mosu_net/include/mosu_net.h), [`src/mosu_net.c`](components/mosu_net/src/mosu_net.c) |
 | `mosu_audio` | Announcement queue and clip chaining; never interrupts a sentence in progress. | [`include/mosu_audio.h`](components/mosu_audio/include/mosu_audio.h), [`src/mosu_audio.c`](components/mosu_audio/src/mosu_audio.c) |
 | `mosu_ui` | The single LVGL watch face, status icons, tap border flash, pixel shift, bring-up test patterns and the BMP screen snapshot. | [`include/mosu_ui.h`](components/mosu_ui/include/mosu_ui.h), [`src/mosu_ui.c`](components/mosu_ui/src/mosu_ui.c) |
-| `mosu_diag` | USB/UART maintenance console: status, time, sync, say, settime, bright, vol, tap, test patterns, screenshot, power, I2C/PMU/RTC/IMU/display dumps. | [`include/mosu_diag.h`](components/mosu_diag/include/mosu_diag.h), [`src/mosu_diag.c`](components/mosu_diag/src/mosu_diag.c) |
+| `mosu_diag` | USB/UART maintenance console: status, time, sync, say, settime, bright, vol, tap, test patterns, screenshot, power, I2C/PMU/RTC/IMU/display dumps, SD format/receive/ls. | [`include/mosu_diag.h`](components/mosu_diag/include/mosu_diag.h), [`src/mosu_diag.c`](components/mosu_diag/src/mosu_diag.c) |
 | `main` | Boot order, power-management locks, screen state machine and the wiring between the components. | [`app_main.c`](main/app_main.c), [`CMakeLists.txt`](main/CMakeLists.txt), [`Kconfig.projbuild`](main/Kconfig.projbuild) |
 | `sim` | Desktop preview that renders the real layout and digit code into BMP files. Not a test. | [`mosu_sim.c`](sim/mosu_sim.c), [`CMakeLists.txt`](sim/CMakeLists.txt) |
 | `test/host` | The host test binary and its suites. | [`CMakeLists.txt`](test/host/CMakeLists.txt), [`test_core.c`](test/host/test_core.c), [`test_session.c`](test/host/test_session.c), [`test_config.c`](test/host/test_config.c), [`test_bmp.c`](test/host/test_bmp.c), [`test_policy.c`](test/host/test_policy.c) |
@@ -91,6 +92,7 @@ replaces [`docs/bringup.md`](docs/bringup.md).
 | Tool | What it does |
 | --- | --- |
 | [`tools/build.ps1`](tools/build.ps1) | Windows wrapper that sources ESP-IDF, builds, and optionally flashes/monitors. |
+| [`tools/push_sd.py`](tools/push_sd.py) | Formats the card on the watch (`--format`) and uploads `mosu.cfg` plus the voice clips over the USB console with an ACK per 4 KB chunk and a CRC-32 per file. |
 | [`tools/gen_voice.py`](tools/gen_voice.py) | Runs the Romanian ONNX voice with onnxruntime and renders the 78 WAV clips into `sd_card/voice` (or `--out`). Trims silence, normalises, fades; `--preview` joins four announcements for a listening check. No GPL tool involved. |
 | [`tools/mosu_g2p.py`](tools/mosu_g2p.py) | Romanian pronunciation: a 38-word IPA lexicon plus the `și` sandhi rule. `--selftest` checks the rules, `--plan` prints all 78 phrases with their phonemes. |
 | [`tools/check_voice.py`](tools/check_voice.py) | Verifies a voice folder: exact names, mono 16-bit WAV, no clipping, no silent clips, and a duration that matches the phrase each clip says. |
@@ -142,6 +144,10 @@ replaces [`docs/bringup.md`](docs/bringup.md).
   PCF85063A time registers start at **0x04** (not the PCF8563's 0x02).
 - `mosu.cfg` is read once at boot. `sd remount` remounts the card but does not
   reparse the file; `reboot` applies config changes.
+- The watch formats its own card (`sd format yes`, FAT32/MBR/32 KB) and takes
+  files over USB (`receive <path> <size> /crc`); `tools/push_sd.py` drives
+  both. A card formatted only by Windows can be rejected with
+  `FR_NO_FILESYSTEM` even though the PC opens it.
 - `build/`, `build-emu/` and emulator logs are generated. Do not commit them.
 - If a hardware claim has not been checked on the real watch, write "not run".
   The bring-up checklist is the only source of a green light.

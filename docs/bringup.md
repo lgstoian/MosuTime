@@ -13,6 +13,7 @@ boot log and the long-standing commands instead, and note it.
 | --- | --- | --- |
 | `help`, `status`, `time`, `sync`, `say`, `settime`, `bright`, `vol`, `tap`, `reboot` | long-standing | day-to-day maintenance |
 | `i2c`, `pmu`, `rtc`, `imu`, `pm`, `heap`, `tasks`, `display`, `test screen`, `test touch`, `test audio`, `screenshot`, `sd remount`, `config`, `power` | bring-up extension | this checklist |
+| `sd format yes`, `receive`, `md`, `ls`, `rm`, `rx bench` | SD bring-up / USB upload | format the card and push files without a reader |
 | `wifi <ssid> <pass>`, `wifi scan`, `wifi presence`, `wifi clear`, `wifi status` | bring-up / card-less provisioning | network tests |
 
 **Session 1 (2026-11-19, COM11, no battery, no SD card).** The I2C inventory,
@@ -20,6 +21,12 @@ RTC, PMU (VBUS only), IMU, panel, touch, audio beeps, both wake sources,
 native-USB console, Wi-Fi join, DHCP, Europe/Bucharest geolocation and SNTP
 were checked on the real watch. The SD card, voice clips and battery/PPK2
 steps are still **not run**; the checkboxes at the end reflect that.
+
+**Session 2 (2026-11-20, COM11, 64 GB SD card, no battery).** The card was
+formatted by the watch, `mosu.cfg` plus 79 WAV files were pushed over USB, and
+`config`, `say`, `screenshot /sdcard/shot.bmp` and `ls` all worked from the
+card. The battery, PPK2, light-sleep current and 24 h soak are still **not
+run**.
 
 ## 0. Before applying power
 
@@ -32,7 +39,8 @@ steps are still **not run**; the checkboxes at the end reflect that.
   small cell to an unconfigured 400 mA charger.
 * Prepare a FAT32 microSD card (16 KB or 32 KB clusters) with `mosu.cfg` in
   the root and `voice/` beside it. The card is optional for boot, but the
-  voice test needs it.
+  voice test needs it. The watch can format the card and receive the files
+  over USB: `python tools/push_sd.py COM11 --format`.
 * Use a USB **data** cable for the console. A charge-only cable gives you a
   port and no output. The board's only reachable USB port is the ESP32-S3
   native USB (GPIO19/20), so the firmware uses USB Serial/JTAG as the primary
@@ -247,11 +255,15 @@ clips, so the phrase audio is still pending.
 
 ## 7. SD card, configuration, voice
 
-1. Format the card FAT32 with 16 KB or 32 KB clusters. Copy
-   `sd_card/mosu.cfg` to the root as `mosu.cfg`.
-2. Edit `[wifi]` with a real SSID and password. Save the file as ASCII or
-   UTF-8; the parser skips a leading UTF-8 BOM. Do not save it as UTF-16.
-3. Generate the voice on the PC:
+The watch formats its own card and takes the files over the USB console, so no
+card reader is needed. This also avoids PC formatters that write a FAT32 table
+Windows accepts but FatFs rejects (`failed to mount card (13)`,
+`FR_NO_FILESYSTEM`).
+
+1. Edit `[wifi]` in `sd_card/mosu.cfg` with a real SSID and password. Save the
+   file as ASCII or UTF-8; the parser skips a leading UTF-8 BOM. Do not save it
+   as UTF-16.
+2. Generate the voice on the PC:
 
    ```sh
    pip install onnxruntime
@@ -260,19 +272,29 @@ clips, so the phrase audio is still pending.
    ```
 
    Expect 78 clips (12 hours, 59 minutes, 7 weekdays), each mono 16-bit WAV.
-   Copy the whole `voice/` folder to the card.
-4. Insert the card. `sd remount` proves the card mounts without a reboot, but
-   it does **not** re-read `mosu.cfg`; run `reboot` to apply the file. Expect
+3. Insert the card (it may be empty, or formatted by any tool), then run:
+
+   ```sh
+   python tools/push_sd.py COM11 --format --ssid camera --pass 'secret'
+   ```
+
+   `--format` runs `sd format yes` on the watch (FAT32, MBR, 32 KB clusters),
+   then uploads `mosu.cfg` and every clip through `receive <path> <size> /crc`.
+   The tool prints `PUSH n/79` lines and finishes with `PUSH PASS`. Without
+   `--format` it only uploads over an existing card.
+4. `sd remount` proves the card mounts without a reboot, but it does **not**
+   re-read `mosu.cfg`; run `reboot` to apply the file. Expect
    `SD card mounted at /sdcard`, a config line with `0 errors`, and
-   `voice clips in /sdcard/voice`.
+   `voice clips in /sdcard/voice`. `ls /sdcard` and `ls /sdcard/voice` list
+   what the watch can actually see.
 5. `config` prints the active values: display, status thresholds, colours,
    clock, announcement, and the SSIDs of the configured networks (never the
    passwords). Check brightness, `screen_on_ms`, `motion_poll_hz`,
    `sync_hours`, the timezone and at least one SSID. It shows what the watch
    is using, not where the value came from.
-6. Negative test: put `brightness = abc` in a copy of the file, reboot, and
-   confirm the line is reported and the watch still boots with the previous
-   value. Restore the good file afterwards.
+6. Negative test: put `brightness = abc` in a copy of the file, upload it,
+   reboot, and confirm the line is reported and the watch still boots with the
+   previous value. Restore the good file afterwards.
 7. Remove the card and reboot: expect `using the cached config, SD card
    unavailable`, the clock still working, and `say` silent.
 
@@ -378,9 +400,11 @@ Give the watch to the wearer only when every line is true.
 - [x] Touch: corners track (25..409 x 8..500), double tap builds the right
       clips, no ghost touches seen, touch wake works. Light-sleep wake is
       still pending because USB holds the no-sleep lock.
-- [ ] Audio: beeps verified; intelligible speech at 85 and clipping at 100
-      are pending the SD card and voice clips.
-- [ ] SD: pending a card; see the GPIO17/DAT3 note above.
+- [ ] Audio: beeps verified; speech played from the card (`say` opened and
+      played three clips), but the 85/100 loudness listening check is pending.
+- [x] SD: the watch formatted the 64 GB card (FAT32/MBR/32 KB), mounted it,
+      took `mosu.cfg` + 79 WAVs over USB with a CRC-32 each, and `ls` read
+      them back. See the GPIO17/DAT3 note above.
 - [x] Wi-Fi: joins `camera` (2.4 GHz WPA2, ~-80 dBm), waits for DHCP, sets
       Europe/Bucharest, writes the RTC, turns the radio off, and fails
       gracefully with a wrong password. Presence scan was checked both ways;

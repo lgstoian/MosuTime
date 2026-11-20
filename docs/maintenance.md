@@ -183,9 +183,17 @@ To change the wording, edit `HOURS`, `minute_text()` or `DAYS` in
 also needs an entry in `LEXICON` in `tools/mosu_g2p.py`, otherwise the render
 stops with the missing word instead of guessing its pronunciation.
 
-Copy the whole `voice/` folder to the card, overwriting the old one. A missing
-clip is not fatal: that fragment is silent and the rest of the sentence still
-plays.
+Copy the whole `voice/` folder to the card, overwriting the old one. With the
+card in the watch, that is one command:
+
+```sh
+python tools/push_sd.py COM11 --no-voice              # config only
+python tools/push_sd.py COM11                         # config + voice
+```
+
+The tool signs off with `PUSH PASS`; `ls /sdcard/voice` on the console then
+lists 79 entries. A missing clip is not fatal: that fragment is silent and the
+rest of the sentence still plays.
 
 `python tools/check_voice.py sd_card/voice` compares each clip's duration with
 the phrase it is supposed to say. A clip that is much longer than its own text
@@ -237,28 +245,39 @@ uses the NVS-cached config and stays silent.
    the watch; if the card slot is not reachable from outside, stop and ask.
 2. Eject the old card. If you can still read it, copy `mosu.cfg` and the
    `voice/` folder somewhere safe first.
-3. Format the new card as FAT32 with 16 KB or 32 KB clusters. Any normal card
-   works; the firmware mounts it 1-bit at 20 MHz and reads only tiny files.
-4. Copy `mosu.cfg` to the root and the `voice/` folder beside it. Keep the
-   names exactly as they are.
-5. Insert the card, apply power, and run:
+3. Insert the new card in the watch (it does not need to be formatted) and
+   upload everything over USB:
+
+   ```sh
+   python tools/push_sd.py COM11 --format
+   ```
+
+   `--format` runs `sd format yes` on the watch, which writes a fresh FAT32
+   volume (MBR, 32 KB clusters) and mounts it. The tool then uploads
+   `mosu.cfg` and the 78 voice clips with a CRC-32 per file. Without
+   `--format`, the card must already be mounted and the tool only uploads.
+4. `reboot`, then run:
 
    ```text
    status
    config
    say
+   ls /sdcard/voice
    ```
 
    `status` must say `SD mounted`; `config` must show the values you put on
-   the card (SSIDs are printed, passwords are not); `say` must speak. `config`
-   reads the in-memory copy, so it only proves the new card after a boot:
-   reinsert the card, `reboot`, and watch the boot log's config line. If it
-   reports errors, fix the file and reboot again.
+   the card (SSIDs are printed, passwords are not); `say` must speak; `ls`
+   must list 79 entries in `voice/` (78 clips plus `preview.wav`). If the
+   config reports errors, fix the file, push it again and `reboot`.
 
 The mount is explicit: it happens at boot, or when you run `sd remount`. There
 is no card-detect switch, so inserting a card while the watch is running does
 nothing until one of those happens. Editing files while the watch is running
 can corrupt FAT, so remove the card only when the watch is off.
+
+A card formatted by a PC can fail with `failed to mount card (13)` even though
+Windows opens it. That is FatFs rejecting an incomplete FAT32 table, not a
+wiring fault: let the watch format it (`sd format yes`) and push again.
 
 ## 7. Troubleshooting
 
@@ -272,6 +291,8 @@ can corrupt FAT, so remove the card only when the watch is off.
 | Watch stays in download (`boot:0x23`) | Release BOOT and power-cycle (long-press PWR ~6 s, then click PWR), or unplug/replug USB without touching BOOT. |
 | Status icons clipped by the glass | The AMOLED has rounded corners; keep `MOSU_SCREEN_MARGIN` at 48 px and `MOSU_STATUS_Y` at 30 px. |
 | Voice is silent | `voice/` missing, wrong file names, not mono 16-bit, or `volume = 0`. Look for `missing clip:` or `need mono 16 bit wav:` in the log. |
+| `failed to mount card (13)` | A PC-formatted FAT32 table is incomplete. Run `sd format yes` and push again with `tools/push_sd.py`. |
+| `PUSH ... no ACK` or `input stalled` | The 4 KB chunk did not arrive intact; `push_sd.py` restarts that file automatically. If it repeats, run `rx bench 262144` and check the reported rate (400 KiB/s or more is healthy on USB Serial/JTAG). |
 | Battery percentage jumps | The percentage comes from battery voltage, not a coulomb counter. It moves in steps and is less accurate under load. Use a PPK2 for energy measurements. |
 | Watch will not charge | Cable, charger, battery connector. `status`/`pmu` show `charging` and `vbus`; a PMU that does not answer is a hardware fault. |
 | Screen stays black | Touch it once; the face is off by default. If it stays black, check the boot log for `display init failed`. |

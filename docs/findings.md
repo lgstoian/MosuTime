@@ -38,8 +38,11 @@ changed to make the emulator work.
 | 19 | SH8601 logs an error for swap_xy(false) | yes (suppressed) | done: boot log has no false E line |
 | 20 | Rounded AMOLED corners clipped the status icons | yes | done: user confirmed both icons visible |
 | 21 | Geolocation ran before DHCP and could not resolve DNS | yes | done: `network timezone: Europe/Bucharest` |
-| 22 | SD socket is SPI-wired; DAT3/CS is GPIO17 | yes (drive high) | pending: mount a card |
+| 22 | SD socket is SPI-wired; DAT3/CS is GPIO17 | yes (drive high) | done: card formatted and mounted at /sdcard |
 | 23 | `tools/build.ps1` aborted on normal stderr and rustup's gcc | yes | done: clean build on this machine |
+| 24 | PC-formatted FAT32 card rejected with `FR_NO_FILESYSTEM` | yes: format on the watch | done: `sd format: ESP_OK, mounted` |
+| 25 | Console CR-to-LF input corrupted binary uploads | yes | done: 79 files pushed with a CRC-32 each |
+| 26 | Binary upload capped at 6 KiB/s and lost the odd byte | yes | done: `rx bench` 455 KiB/s, 79 files in ~20 s |
 
 ## 1. SD mount blocking boot
 
@@ -608,8 +611,11 @@ the card enter SD mode. If a card still fails, switch the mount to SDSPI.
 [`components/mosu_board/src/mosu_board_storage.c`](../components/mosu_board/src/mosu_board_storage.c)
 (`mount_now`).
 
-**Verification.** Pending: insert a FAT32 card, run `sd remount` and `config`,
-and confirm the 78 voice clips.
+**Verification.** Done: with GPIO17 driven high, the 64 GB card initialised at
+20 MHz 1-bit and the watch formatted and mounted it (`SD card formatted and
+mounted at /sdcard`). The card was later pushed full of clips and read back
+with `ls`. Whether the pin drive is strictly required was not tested by
+removing it.
 
 ## 23. `tools/build.ps1` aborted on normal stderr and rustup's gcc
 
@@ -630,6 +636,97 @@ IDF-managed `xtensa-esp-elf` version from `tools/tools.json` to `PATH`.
 
 **Verification.** A clean `build` from an empty `build/` and `sdkconfig`
 finishes with `Project build complete` and zero `warning:`/`error:` lines.
+
+## 24. A PC-formatted FAT32 card is rejected with `FR_NO_FILESYSTEM`
+
+**Symptom.** A 64 GB SDXC card that Windows reads and writes without complaint
+failed every boot with `vfs_fat_sdmmc: failed to mount card (13)` and
+`mosu_sd: SD card not mounted: ESP_FAIL`. `sd dump` showed a valid MBR
+(type `0x0C`, start LBA 63) and a valid FAT32 VBR: 512-byte sectors, 64
+sectors per cluster, 8212 reserved sectors, 2 FATs, 15232 FAT sectors,
+signature `55AA`.
+
+**Cause.** The formatter sized the data area for 1,949,730 clusters but wrote
+15,232 FAT sectors, which hold 1,949,696 entries. FatFs validates the table
+against the volume in `find_volume`: `fs->fsize < (szbfat + SS - 1) / SS`
+becomes `15232 < 15233`, so it returns `FR_NO_FILESYSTEM` (13). Windows does
+not run that check, which is why the card looked healthy on the PC.
+
+**Fix.** Format on the watch: `sd format yes` (or `--format` in
+`tools/push_sd.py`) runs `f_mkfs` through
+`esp_vfs_fat_sdmmc_mount(..., format_if_mount_failed = true)` with a 32 KB
+allocation unit, producing MBR + FAT32 with a complete table. The same console
+adds the upload side (`receive`, `md`, `ls`) so the files can be pushed over
+USB without a card reader.
+
+**Fix lives in.**
+[`components/mosu_board/src/mosu_board_storage.c`](../components/mosu_board/src/mosu_board_storage.c)
+(`mosu_board_sdcard_format`, `mount_now`),
+[`components/mosu_diag/src/mosu_diag.c`](../components/mosu_diag/src/mosu_diag.c)
+(`sd format yes`, `receive`, `md`, `ls`),
+[`tools/push_sd.py`](../tools/push_sd.py).
+
+**Verification.** `sd format yes` printed `sd format: ESP_OK, mounted`; the
+tool then pushed `mosu.cfg` and all voice clips, each accepted by the device's
+CRC-32, and `ls /sdcard/voice` listed the files.
+
+## 25. Console CR-to-LF conversion corrupted binary uploads
+
+**Symptom.** The first upload attempt ended with
+`receive: CRC mismatch (got 0x0D4A1185, want 0x0A4A1185)` for the payload
+`hello world`: the device computed the right CRC but read the wrong trailer.
+Every WAV with a `0x0D` byte was rejected.
+
+**Cause.** `CONFIG_LIBC_STDIN_LINE_ENDING_CR` makes the USB Serial/JTAG VFS
+translate every incoming `0x0D` to `0x0A` (`usb_serial_jtag_vfs.c`,
+`rx_mode`). That is right for a terminal and wrong for a binary file.
+
+**Fix.** Binary uploads no longer go through the console VFS: `read_exact()`
+reads `usb_serial_jtag_read_bytes()` straight from the USB Serial/JTAG driver's
+ring buffer, which has no CR translation. The console's own input stays in its
+normal CR mode. The console task's stack grew to 8 KB to hold the 4 KB chunk
+buffer. The host waits for `RX <cumulative>` after each 4 KB chunk and for
+`RX DONE` after the CRC, and resynchronises with `help` if a transfer is
+abandoned.
+
+**Fix lives in.**
+[`components/mosu_diag/src/mosu_diag.c`](../components/mosu_diag/src/mosu_diag.c)
+(`receive_file`, `read_exact`), [`tools/push_sd.py`](../tools/push_sd.py).
+
+**Verification.** A 1 KB file containing every byte value passed the CRC
+check, and so did all 79 files in the full push.
+
+## 26. Binary upload ran at 6 KiB/s and lost the odd byte
+
+**Symptom.** The first full voice push took tens of minutes, and about one
+4 KB chunk in 300 never arrived, leaving the watch waiting and the host
+retrying the file. `rx bench` (the same read loop without a file) measured
+6.3 KiB/s, so the SD card was not the cause.
+
+**Cause.** Two problems in the bare console path. The USB Serial/JTAG VFS does
+not block: when its 64-byte hardware FIFO is empty it returns
+`-1`/`EWOULDBLOCK`, and `read_exact()` treated that as "no data yet" and slept
+10 ms, so every 64-byte packet cost a full 10 ms (64 bytes / 10 ms = 6.4 KiB/s).
+Polling the FIFO from a task also loses a byte if a higher-priority task runs
+between the "bytes available" query and the reads.
+
+**Fix.** Install the USB Serial/JTAG driver with an 8 KB receive ring in
+`mosu_diag_start()` and feed `read_exact()` from
+`usb_serial_jtag_read_bytes()`. The ISR drains the hardware FIFO into the ring
+whatever the task priorities are, one call returns a whole block, and the VFS
+CR-to-LF translation is bypassed. Measured rate on COM11 is ~450 KiB/s with no
+losses in 1.5 MB. Using the driver *through the VFS* was tested first and was
+slower (10 KiB/s) because that path still reads one character per call.
+`rx bench <bytes>` reports the rate on the watch.
+
+**Fix lives in.**
+[`components/mosu_diag/src/mosu_diag.c`](../components/mosu_diag/src/mosu_diag.c)
+(`read_exact`, `rx_bench`, `mosu_diag_start`).
+
+**Verification.** `rx bench 524288` reports ~450 KiB/s three times in a row;
+the full 79-file push completes in about 20 s at ~230-300 KiB/s. One push
+retried a single file after a lost 4 KB chunk; the tool restarts that file and
+the CRC-32 still guarantees what lands on the card.
 
 ## Adding a finding
 

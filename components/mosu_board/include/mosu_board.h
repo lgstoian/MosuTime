@@ -101,8 +101,14 @@ bool mosu_board_touch_active(void);
 void mosu_board_display_info(mosu_board_display_info_t *out);
 
 esp_err_t mosu_board_sdcard_mount(void);
+/* Destructive: format the card as FAT32 and mount it again. */
+esp_err_t mosu_board_sdcard_format(void);
 void mosu_board_sdcard_unmount(void);
 bool mosu_board_sdcard_ready(void);
+/* Show the raw sdmmc/FAT driver logs around the next mount (bring-up). */
+void mosu_board_sdcard_set_verbose(bool verbose);
+/* Raw sector-0 dump: tells FAT32/MBR from exFAT/GPT/blank without a PC. */
+esp_err_t mosu_board_sdcard_dump_boot(void);
 
 esp_err_t mosu_board_pmu_read(mosu_board_pmu_t *out);
 

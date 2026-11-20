@@ -11,4 +11,5 @@ idf_component_register(
         mosu_ui
         esp_system
         freertos
+        esp_driver_usb_serial_jtag
 )

@@ -6,16 +6,26 @@
  * commands that answer "is it synced, is the card there, does it speak".
  */
 #include <ctype.h>
+#include <dirent.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
 #include "esp_log.h"
+#include "esp_rom_crc.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+#include "driver/usb_serial_jtag.h"
+#include "driver/usb_serial_jtag_vfs.h"
+#endif
 
 #include "mosu_audio.h"
 #include "mosu_board.h"
@@ -31,6 +41,7 @@ static mosu_config_t *s_cfg;
 
 static mosu_diag_hooks_t s_hooks;
 static volatile bool s_touch_test;
+static bool s_sd_verbose;
 
 static void print_status(void)
 {
@@ -178,6 +189,194 @@ static void test_screen(const char *name)
     }
 }
 
+/*
+ * Read exactly len bytes from the console.  With USB Serial/JTAG the console
+ * driver's ring buffer is used directly: the ISR drains the 64-byte hardware
+ * FIFO, so a higher-priority task cannot make the reader lose a byte, and one
+ * call returns a whole block.  Reading the driver also bypasses the VFS
+ * CR-to-LF translation, which would corrupt a binary 0x0D.  The UART and
+ * emulator builds fall back to the VFS.
+ */
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+static bool s_usj_ready;
+#endif
+
+static bool read_exact(uint8_t *buffer, size_t len)
+{
+    size_t got = 0;
+    TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(5000);
+
+    while (got < len) {
+        ssize_t n = -1;
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+        if (s_usj_ready) {
+            n = usb_serial_jtag_read_bytes(buffer + got, len - got,
+                                           pdMS_TO_TICKS(1000));
+        } else
+#endif
+        {
+            n = read(STDIN_FILENO, buffer + got, len - got);
+        }
+        if (n > 0) {
+            got += (size_t)n;
+            deadline = xTaskGetTickCount() + pdMS_TO_TICKS(5000);
+            continue;
+        }
+        if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK &&
+            errno != EINTR) {
+            return false;
+        }
+        if ((int32_t)(xTaskGetTickCount() - deadline) >= 0) {
+            return false;
+        }
+        vTaskDelay(1);
+    }
+    return true;
+}
+
+/*
+ * Binary upload used by tools/push_sd.py.  The host sends a 4096-byte chunk,
+ * waits for "RX <cumulative>" and only then sends the next one, so the USB
+ * Serial/JTAG path cannot overrun and the ACK means the bytes reached the
+ * file.  The optional /crc trailer is a little-endian CRC-32.
+ */
+static bool receive_file(const char *path, uint32_t size, bool verify_crc)
+{
+    if (!mosu_board_sdcard_ready()) {
+        printf("receive: no SD card\n");
+        return false;
+    }
+    if (size == 0 || size > 1024 * 1024) {
+        printf("receive: size must be 1..1048576\n");
+        return false;
+    }
+
+    FILE *file = fopen(path, "wb");
+    if (!file) {
+        printf("receive: cannot create %s (%s)\n", path, strerror(errno));
+        return false;
+    }
+
+    printf("\n=== RX READY ===\n");
+    fflush(stdout);
+
+    uint8_t buffer[4096];
+    uint32_t done = 0;
+    uint32_t crc = 0;
+
+    while (done < size) {
+        uint32_t want = size - done;
+        if (want > sizeof(buffer)) {
+            want = sizeof(buffer);
+        }
+
+        if (!read_exact(buffer, want)) {
+            fclose(file);
+            remove(path);
+            printf("receive: input stalled at %u/%u bytes\n", (unsigned)done,
+                   (unsigned)size);
+            return false;
+        }
+
+        if (fwrite(buffer, 1, want, file) != want) {
+            fclose(file);
+            remove(path);
+            printf("receive: write failed at %u/%u bytes\n", (unsigned)done,
+                   (unsigned)size);
+            return false;
+        }
+        crc = esp_rom_crc32_le(crc, buffer, want);
+        done += want;
+        printf("RX %u\n", (unsigned)done);
+        fflush(stdout);
+    }
+
+    if (verify_crc) {
+        uint8_t trailer[4];
+        if (!read_exact(trailer, sizeof(trailer))) {
+            fclose(file);
+            remove(path);
+            printf("receive: missing CRC trailer\n");
+            return false;
+        }
+        uint32_t expected = (uint32_t)trailer[0] |
+                            ((uint32_t)trailer[1] << 8) |
+                            ((uint32_t)trailer[2] << 16) |
+                            ((uint32_t)trailer[3] << 24);
+        if (expected != crc) {
+            fclose(file);
+            remove(path);
+            printf("receive: CRC mismatch (got 0x%08X, want 0x%08X)\n",
+                   (unsigned)crc, (unsigned)expected);
+            return false;
+        }
+    }
+
+    if (fclose(file) != 0) {
+        remove(path);
+        printf("receive: close failed (%s)\n", strerror(errno));
+        return false;
+    }
+
+    printf("=== RX DONE ===\n");
+    fflush(stdout);
+    return true;
+}
+
+static void rx_bench(uint32_t size)
+{
+    uint8_t buffer[4096];
+    uint32_t done = 0;
+    const int64_t start = esp_timer_get_time();
+
+    printf("\n=== RX READY ===\n");
+    fflush(stdout);
+
+    while (done < size) {
+        uint32_t want = size - done;
+        if (want > sizeof(buffer)) {
+            want = sizeof(buffer);
+        }
+        if (!read_exact(buffer, want)) {
+            printf("rx bench: stalled at %u\n", (unsigned)done);
+            break;
+        }
+        done += want;
+        printf("RX %u\n", (unsigned)done);
+        fflush(stdout);
+    }
+
+    const int64_t elapsed_us = esp_timer_get_time() - start;
+    const int64_t ms = elapsed_us / 1000;
+    printf("rx bench: %u bytes in %lld ms (%.1f KiB/s)\n", (unsigned)done,
+           (long long)ms,
+           ms > 0 ? (double)done / 1024.0 * 1000.0 / (double)ms : 0.0);
+    printf("=== RX DONE ===\n");
+    fflush(stdout);
+}
+
+static void list_dir(const char *path)
+{
+    DIR *dir = opendir(path);
+    if (!dir) {
+        printf("ls %s: %s\n", path, strerror(errno));
+        return;
+    }
+
+    unsigned entries = 0;
+    struct dirent *ent;
+    while ((ent = readdir(dir)) != NULL) {
+        if (!strcmp(ent->d_name, ".") || !strcmp(ent->d_name, "..")) {
+            continue;
+        }
+        printf("  %s%s\n", ent->d_name,
+               ent->d_type == DT_DIR ? "/" : "");
+        entries++;
+    }
+    closedir(dir);
+    printf("ls %s: %u entries\n", path, entries);
+}
+
 static void handle_line(char *line)
 {
     while (*line && isspace((unsigned char)*line)) {
@@ -192,10 +391,51 @@ static void handle_line(char *line)
         printf("  status time sync say settime bright vol tap reboot\n");
         printf("  i2c pmu rtc imu pm heap tasks display config\n");
         printf("  test screen [colors|grid|corners|off]\n");
-        printf("  test touch | test audio | sd remount\n");
+        printf("  test touch | test audio | sd remount | sd verbose | sd dump\n");
+        printf("  sd format yes | receive <path> <size> [/crc] | md <path>\n");
+        printf("  ls [path] | rm <path> | rx bench <bytes>\n");
         printf("  wifi <ssid> <password> | scan | presence | clear | status\n");
         printf("  screenshot [path] | power screen on|off | power wifi |\n");
         printf("  power idle\n");
+    } else if (!strncmp(line, "receive ", 8)) {
+        char path[128];
+        unsigned long size = 0;
+        char option[8] = {0};
+        int n = sscanf(line + 8, "%127s %lu %7s", path, &size, option);
+        if (n < 2) {
+            printf("usage: receive <path> <size> [/crc]\n");
+            return;
+        }
+        bool verify_crc = n >= 3 && !strcmp(option, "/crc");
+        receive_file(path, (uint32_t)size, verify_crc);
+    } else if (!strncmp(line, "rx bench ", 9)) {
+        uint32_t size = (uint32_t)strtoul(line + 9, NULL, 10);
+        if (size == 0 || size > 4 * 1024 * 1024) {
+            printf("usage: rx bench <bytes> (1..4194304)\n");
+            return;
+        }
+        rx_bench(size);
+    } else if (!strncmp(line, "md ", 3) || !strncmp(line, "mkdir ", 6)) {
+        const char *path =
+            !strncmp(line, "mkdir ", 6) ? line + 6 : line + 3;
+        errno = 0;
+        if (mkdir(path, 0777) == 0) {
+            printf("mkdir %s\n", path);
+        } else if (errno == EEXIST) {
+            printf("mkdir %s: exists\n", path);
+        } else {
+            printf("mkdir %s: %s\n", path, strerror(errno));
+        }
+    } else if (!strncmp(line, "rm ", 3)) {
+        if (remove(line + 3) == 0) {
+            printf("rm %s\n", line + 3);
+        } else {
+            printf("rm %s: %s\n", line + 3, strerror(errno));
+        }
+    } else if (!strcmp(line, "ls")) {
+        list_dir("/sdcard");
+    } else if (!strncmp(line, "ls ", 3)) {
+        list_dir(line + 3);
     } else if (!strcmp(line, "status")) {
         print_status();
     } else if (!strcmp(line, "time")) {
@@ -364,6 +604,21 @@ static void handle_line(char *line)
     } else if (!strcmp(line, "test audio")) {
         esp_err_t err = mosu_board_audio_test();
         printf("audio test: %s\n", esp_err_to_name(err));
+    } else if (!strcmp(line, "sd verbose")) {
+        s_sd_verbose = !s_sd_verbose;
+        mosu_board_sdcard_set_verbose(s_sd_verbose);
+        printf("sd verbose %s\n", s_sd_verbose ? "on" : "off");
+    } else if (!strcmp(line, "sd dump")) {
+        esp_err_t err = mosu_board_sdcard_dump_boot();
+        printf("sd dump: %s\n", esp_err_to_name(err));
+    } else if (!strcmp(line, "sd format")) {
+        printf("sd format: this erases the card; use 'sd format yes'\n");
+    } else if (!strcmp(line, "sd format yes")) {
+        printf("sd format: formatting, do not remove the card...\n");
+        fflush(stdout);
+        esp_err_t err = mosu_board_sdcard_format();
+        printf("sd format: %s, %s\n", esp_err_to_name(err),
+               mosu_board_sdcard_ready() ? "mounted" : "not mounted");
     } else if (!strcmp(line, "sd remount")) {
         esp_err_t err = mosu_board_sdcard_remount();
         printf("sd remount: %s, %s\n", esp_err_to_name(err),
@@ -460,7 +715,25 @@ esp_err_t mosu_diag_start(mosu_config_t *cfg)
     }
     s_cfg = cfg;
 
-    if (xTaskCreate(diag_task, "mosu_diag", 4096, NULL, 2, NULL) != pdPASS) {
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+    /* The bare console reads the 64-byte hardware FIFO a byte at a time; a
+     * higher-priority task in the wrong moment can make it lose a byte and
+     * stall a binary upload.  The USJ driver drains the FIFO in its ISR into
+     * a ring buffer, and the same VFS then reads whole blocks from there. */
+    usb_serial_jtag_driver_config_t usj_cfg = {
+        .tx_buffer_size = 1024,
+        .rx_buffer_size = 8192,
+    };
+    esp_err_t usj_err = usb_serial_jtag_driver_install(&usj_cfg);
+    if (usj_err == ESP_OK || usj_err == ESP_ERR_INVALID_STATE) {
+        usb_serial_jtag_vfs_use_driver();
+        s_usj_ready = true;
+    } else {
+        ESP_LOGW(TAG, "USB console buffering: %s", esp_err_to_name(usj_err));
+    }
+#endif
+
+    if (xTaskCreate(diag_task, "mosu_diag", 8192, NULL, 2, NULL) != pdPASS) {
         return ESP_ERR_NO_MEM;
     }
     ESP_LOGI(TAG, "console started");

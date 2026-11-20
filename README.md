@@ -105,11 +105,26 @@ unplugged.
 ```
 
 The card is optional at boot: if it is missing or unreadable the watch uses the
-last good configuration cached in NVS, and stays silent. Format the card as
-FAT32 with 16 KB or 32 KB clusters (any normal card works).
+last good configuration cached in NVS, and stays silent. The watch can format
+the card itself and receive the files over the USB console, so no card reader
+or third-party formatter is needed:
 
-Copy `sd_card/mosu.cfg` to the card, edit the Wi-Fi network and brightness,
-and generate the voice with the script below.
+```sh
+# Format FAT32 (MBR, 32 KB clusters), then push mosu.cfg and the 78 clips.
+python tools/push_sd.py COM11 --format --ssid camera --pass 'secret'
+```
+
+Without `--format` the tool only uploads. It uses the console's ACK-paced
+`receive <path> <size> /crc` protocol, so every clip is written in order and
+verified with a CRC-32 before the next one starts; the whole 5.4 MB set takes
+about 20 seconds over USB Serial/JTAG. A card formatted on the PC
+also works, but the FAT table must be complete: some Windows formatters write a
+FAT32 volume that Windows accepts and FatFs rejects (`failed to mount card
+(13)`, `FR_NO_FILESYSTEM`). `sd format yes` or `--format` is the reliable path.
+
+Edit the Wi-Fi network and brightness in `sd_card/mosu.cfg` (or pass `--ssid`
+and `--pass` to the push tool), generate the voice with the script below, then
+push both with `tools/push_sd.py`.
 
 ### Configuration
 
@@ -287,8 +302,9 @@ help status time sync say settime bright N vol N tap reboot
 i2c pmu rtc imu pm heap tasks display config
 wifi <ssid> <password> | wifi scan | wifi presence | wifi clear
 test screen [colors|grid|corners|off] | test touch | test audio
-screenshot [path] | sd remount
-power screen on|off | power wifi | power idle
+screenshot [path] | sd remount | sd verbose | sd dump
+sd format yes | receive <path> <size> [/crc] | md <path> | ls [path]
+rm <path> | rx bench <bytes> | power screen on|off | power wifi | power idle
 ```
 
 `bright` and `vol` change the value at runtime; edit `mosu.cfg` to make it
