@@ -285,7 +285,6 @@ static void test_power_loosen(void)
     EXPECT(learn.angle_loosen > 0);
     EXPECT(mosu_power_learn_angle(&learn, 45) < 45);
     EXPECT(mosu_power_learn_hold(&learn, 250) < 250);
-    EXPECT(mosu_power_learn_still(&learn, 600) < 600);
     EXPECT(mosu_power_learn_face(&learn, 200) < 200);
 
     /* The loosening has a floor; it can never disable the gesture. */
@@ -296,7 +295,6 @@ static void test_power_loosen(void)
     }
     EXPECT(mosu_power_learn_angle(&learn, 45) >= 25);
     EXPECT(mosu_power_learn_hold(&learn, 250) >= 150);
-    EXPECT(mosu_power_learn_still(&learn, 600) >= 250);
     EXPECT(mosu_power_learn_face(&learn, 200) >= 100);
 }
 

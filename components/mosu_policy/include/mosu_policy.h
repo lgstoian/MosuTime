@@ -123,7 +123,6 @@ typedef struct {
      * fires: the gesture gates were too strict for this arm. */
     uint8_t angle_loosen;   /* degrees below the configured angle, 0..30 */
     uint8_t face_loosen;    /* 0.05 steps below the face-up gate, 0..6 */
-    uint16_t still_loosen_ms;
     uint16_t hold_loosen_ms;
     uint32_t window_ms;     /* time accumulated in this window */
     uint32_t screen_ms;     /* lit time in this window */
@@ -149,8 +148,6 @@ uint32_t mosu_power_learn_screen_ms(const mosu_power_learn_t *learn,
                                     uint32_t base_ms);
 uint16_t mosu_power_learn_hold(const mosu_power_learn_t *learn,
                                uint16_t base_ms);
-uint16_t mosu_power_learn_still(const mosu_power_learn_t *learn,
-                                uint16_t base_ms);
 uint16_t mosu_power_learn_face(const mosu_power_learn_t *learn,
                                uint16_t base_milli);
 

@@ -47,6 +47,8 @@ changed to make the emulator work.
 | 28 | A 35 deg / 150 ms wrist raise woke the face far too often | yes | done: 50 deg / 300 ms / 5 s and learned steps |
 | 29 | USB console open reset the CPU and wiped the counters | yes: RTC no-init | done: `stats` survives reconnects |
 | 30 | Half a white screen and a freeze when the face woke | yes | done: 100 forced off/on cycles |
+| 31 | Lift-to-wake only responded to a hard shake | yes | logic + host simulation; wrist test pending |
+| 32 | AXP2101 left eight unused rails enabled | yes: rail dump | done: rails off, I2C/SD/audio still pass |
 
 ## 1. SD mount blocking boot
 
@@ -823,6 +825,66 @@ manager now owns the panel and the sleep lock.
 **Verification.** 100 forced `power screen off`/`power screen on` cycles
 completed with no hang, and a screenshot taken after the cycles is a complete
 410x502 face.
+
+## 31. Lift-to-wake only responded to a hard shake
+
+**Symptom.** After v1.1.2 the face stayed dark for a normal wrist raise; only a
+deliberate shake woke it. Loosening the angle did not help.
+
+**Cause.** The detector required the arm to have been still for `still_before`
+milliseconds *at the sample where the orientation crossed the angle threshold*.
+A real raise is continuous: the arm leaves the resting orientation, and by the
+time it has turned 45 degrees the stillness timer has been reset by every
+movement sample. The gate could only be satisfied if the whole 45 degrees
+happened between two samples — which is exactly what a shake does. The
+stillness was measured, but it was read at the wrong moment.
+
+**Fix.** Stillness is no longer a gate. It is used only (a) to stop the resting
+baseline from following the arm during a movement and (b) to decide when a new
+resting orientation has settled. A raise now needs: a real orientation change,
+the new orientation held for 250 ms, the screen normal not vertical, and the
+refractory window. A candidate that fails those tests is adopted as the new
+baseline after 1.5 s, so the detector can never get stuck measuring from an arm
+position the wearer left. The IMU is sampled at 20 Hz to match the QMI8658's
+21 Hz low-power ODR; 8 Hz gave only three samples per raise.
+
+**Fix lives in.**
+[`components/mosu_core/src/mosu_wrist.c`](../components/mosu_core/src/mosu_wrist.c),
+[`components/mosu_core/include/mosu_core/mosu_core.h`](../components/mosu_core/include/mosu_core/mosu_core.h),
+[`main/app_main.c`](../main/app_main.c) (poll rate, raise counters).
+
+**Verification.** Host simulation: a continuous 300 ms raise, a raise that
+starts while the arm is swinging, a vertical-glass reach that must not fire, the
+baseline-recovery path, the refractory window and a 3-degree wobble. `stats`
+prints `raise: N fired / M candidates, last DEG, nz` and the `motion [s]`
+console command prints live samples and `RAISE` so the gesture can be checked
+on the wrist.
+
+## 32. The PMU powered eight rails nothing uses
+
+**Symptom.** No failure; the battery simply drained faster than the power model
+predicted.
+
+**Cause.** The AXP2101 comes out of reset with `0x80 = 0x0F`, `0x90 = 0xFF` and
+`0x91 = 0x01`: DCDC1-4, all four ALDOs, both BLDOs, CPUSLDO and both DLDOs on.
+On this board the schematic connects only DCDC1 (VCC3V3) and ALDO1/2/4; DCDC2-4
+have no inductor or load, BLDO1/2 and CPUSLDO are open pins, DLDO1/2 are switch
+outputs with no wire, and ALDO3 is the vibration motor, which this firmware
+never drives. Each idle rail still burns its quiescent current.
+
+**Fix.** `mosu_board_pmu_init()` now switches the unused rails off explicitly
+and logs the result (`rails: dcdc 0x01, ldo 0x0B/0x00`). The rail table is in
+the driver, `pmu` prints every rail and `pmu rail <name> on|off` changes one, so
+a wrong assumption can be undone at the console without a rebuild.
+
+**Fix lives in.**
+[`components/mosu_board/src/mosu_board_i2c.c`](../components/mosu_board/src/mosu_board_i2c.c),
+[`components/mosu_board/include/mosu_board.h`](../components/mosu_board/include/mosu_board.h),
+[`components/mosu_diag/src/mosu_diag.c`](../components/mosu_diag/src/mosu_diag.c).
+
+**Verification.** After the change: I2C scan still finds 7 devices, the IMU
+reads, the SD card mounts, a 410x502 screenshot is written to it and the audio
+test plays. Current saving is not measured yet; see `docs/power.md`.
 
 ## Adding a finding
 

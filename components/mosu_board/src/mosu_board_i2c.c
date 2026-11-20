@@ -13,6 +13,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
@@ -103,6 +104,81 @@ static esp_err_t reg_write_u8(i2c_master_dev_handle_t dev, uint8_t reg,
 
 /* ------------------------------------------------------------------ PMU */
 
+static esp_err_t pmu_update(uint8_t reg, uint8_t mask, uint8_t value);
+
+/* AXP2101 rails and the enable bits that switch them.
+ *
+ * The board wires only a few of them (see the Waveshare schematic):
+ *   DCDC1 3.3 V  -> VCC3V3: ESP32-S3, AMOLED, touch, IMU, SD card, codec
+ *   ALDO1..4     -> display enable pull-up, motor supply, misc pull-ups
+ *   DCDC2/3/4    -> no external inductor or load
+ *   BLDO1/2      -> pins left open
+ *   CPUSLDO      -> pin left open
+ *   DLDO1/2      -> switch outputs, left open
+ * The PMU comes out of reset with all of them on, so the unused ones are
+ * switched off explicitly below.  Each one costs only its quiescent current,
+ * but there are seven of them and the cell is 400 mAh. */
+typedef struct {
+    const char *name;
+    uint8_t reg; /* enable register */
+    uint8_t bit;
+    bool used;
+} axp_rail_t;
+
+static const axp_rail_t s_rails[] = {
+    {"dcdc1", 0x80, 0, true},  {"dcdc2", 0x80, 1, false},
+    {"dcdc3", 0x80, 2, false}, {"dcdc4", 0x80, 3, false},
+    {"dcdc5", 0x80, 4, false}, {"aldo1", 0x90, 0, true},
+    {"aldo2", 0x90, 1, true},  {"aldo3", 0x90, 2, false}, /* motor, unused */
+    {"aldo4", 0x90, 3, true},  {"bldo1", 0x90, 4, false},
+    {"bldo2", 0x90, 5, false}, {"cpusldo", 0x90, 6, false},
+    {"dldo1", 0x90, 7, false}, {"dldo2", 0x91, 0, false},
+};
+
+static const axp_rail_t *rail_find(const char *name)
+{
+    if (!name) {
+        return NULL;
+    }
+    for (size_t i = 0; i < sizeof(s_rails) / sizeof(s_rails[0]); i++) {
+        if (!strcasecmp(name, s_rails[i].name)) {
+            return &s_rails[i];
+        }
+    }
+    return NULL;
+}
+
+esp_err_t mosu_board_pmu_rail_set(const char *name, bool on)
+{
+    if (!s_pmu) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    const axp_rail_t *rail = rail_find(name);
+    if (!rail) {
+        return ESP_ERR_NOT_FOUND;
+    }
+    const uint8_t mask = (uint8_t)(1u << rail->bit);
+    return pmu_update(rail->reg, mask, on ? mask : 0);
+}
+
+bool mosu_board_pmu_rail_get(const char *name, bool *on)
+{
+    if (!on) {
+        return false;
+    }
+    const axp_rail_t *rail = rail_find(name);
+    if (!rail || !s_pmu) {
+        return false;
+    }
+    uint8_t value = 0;
+    if (reg_read(s_pmu, rail->reg, &value, 1) != ESP_OK) {
+        return false;
+    }
+    *on = (value & (1u << rail->bit)) != 0;
+    return true;
+}
+
+
 static esp_err_t pmu_update(uint8_t reg, uint8_t mask, uint8_t value)
 {
     uint8_t current = 0;
@@ -149,6 +225,29 @@ esp_err_t mosu_board_pmu_init(void)
     uint8_t key_cfg = 0;
     ESP_RETURN_ON_ERROR(reg_read(s_pmu, 0x27, &key_cfg, 1), TAG, "pmu key");
     ESP_RETURN_ON_ERROR(pmu_update(0x27, 0x0C, 0x0C), TAG, "pmu key off");
+    /* Switch off the rails this board does not use.  They are enabled after
+     * reset and each one still draws its quiescent current with no load. */
+    for (size_t i = 0; i < sizeof(s_rails) / sizeof(s_rails[0]); i++) {
+        if (!s_rails[i].used) {
+            esp_err_t rail_err = mosu_board_pmu_rail_set(s_rails[i].name,
+                                                         false);
+            if (rail_err != ESP_OK) {
+                ESP_LOGW(TAG, "cannot switch off %s (%s)", s_rails[i].name,
+                         esp_err_to_name(rail_err));
+            }
+        }
+    }
+
+    uint8_t dc = 0;
+    uint8_t ldo0 = 0;
+    uint8_t ldo1 = 0;
+    if (reg_read(s_pmu, 0x80, &dc, 1) == ESP_OK &&
+        reg_read(s_pmu, 0x90, &ldo0, 1) == ESP_OK &&
+        reg_read(s_pmu, 0x91, &ldo1, 1) == ESP_OK) {
+        ESP_LOGI(TAG, "rails: dcdc 0x%02X, ldo 0x%02X/0x%02X (unused off)",
+                 dc, ldo0, ldo1);
+    }
+
     ESP_LOGI(TAG, "PWRKEY 0x27: 0x%02X -> 0x%02X (10 s hold powers off)",
              key_cfg, (uint8_t)(key_cfg | 0x0C));
 
@@ -465,6 +564,14 @@ void mosu_board_pmu_dump(void)
     if (err != ESP_OK) {
         printf("pmu : decode failed (%s)\n", esp_err_to_name(err));
         return;
+    }
+
+    for (size_t i = 0; i < sizeof(s_rails) / sizeof(s_rails[0]); i++) {
+        bool on = false;
+        if (mosu_board_pmu_rail_get(s_rails[i].name, &on)) {
+            printf("pmu : %-8s %s%s\n", s_rails[i].name, on ? "on " : "off",
+                   s_rails[i].used ? " (used)" : "");
+        }
     }
 
     printf("pmu : battery %s, vbus %s, charging %s\n",

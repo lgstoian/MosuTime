@@ -57,7 +57,10 @@ static bool s_lvgl_stopped;
  * wake count are the two numbers that explain a short battery life.  They
  * live in RTC memory so opening the USB console (which resets the CPU) does
  * not wipe a measurement that started on battery. */
-#define MOSU_STATS_MAGIC 0x4D4F5355u
+/* Bump when the RTC_NOINIT layout changes: the magic only says "this block was
+ * written by this firmware", and reusing it across a layout change would
+ * interpret old bytes as new counters. */
+#define MOSU_STATS_MAGIC 0x4D4F5356u
 /* RTC_NOINIT, not RTC_DATA: a plain CPU reset (the USB console opening does
  * one) re-initialises .rtc.data, while .rtc.noinit survives it. */
 RTC_NOINIT_ATTR static uint32_t s_stats_magic;
@@ -67,6 +70,10 @@ RTC_NOINIT_ATTR static uint32_t s_baseline_epoch;
 RTC_NOINIT_ATTR static uint8_t s_boot_pct;
 RTC_NOINIT_ATTR static bool s_boot_pct_set;
 RTC_NOINIT_ATTR static uint32_t s_boot_count;
+RTC_NOINIT_ATTR static uint32_t s_raise_fired;
+RTC_NOINIT_ATTR static uint32_t s_raise_candidates;
+RTC_NOINIT_ATTR static int16_t s_last_raise_nz_milli;
+RTC_NOINIT_ATTR static uint8_t s_last_raise_deg;
 static uint32_t s_screen_on_since_ms;
 
 /* Learned screen policy: it adapts the wrist threshold and the lit window to
@@ -84,6 +91,10 @@ static void stats_init(void)
     s_stats_magic = MOSU_STATS_MAGIC;
     s_wake_count = 0;
     s_screen_on_total_ms = 0;
+    s_raise_fired = 0;
+    s_raise_candidates = 0;
+    s_last_raise_nz_milli = 0;
+    s_last_raise_deg = 0;
     s_baseline_epoch = 0;
     s_boot_pct = 0;
     s_boot_pct_set = false;
@@ -400,8 +411,6 @@ static void apply_power_learning(void)
                                             s_cfg.display.motion_angle_deg);
     s_wrist_cfg.angle_mdeg = angle * 1000u;
     s_wrist_cfg.hold_ms = mosu_power_learn_hold(&s_power_learn, 250);
-    s_wrist_cfg.still_before_ms =
-        mosu_power_learn_still(&s_power_learn, 600);
     s_wrist_cfg.face_up_milli = mosu_power_learn_face(&s_power_learn, 200);
 
     uint32_t screen =
@@ -410,10 +419,8 @@ static void apply_power_learning(void)
     mosu_session_set_screen_on_ms(&s_session, screen);
     taskEXIT_CRITICAL(&s_session_mux);
 
-    ESP_LOGI(TAG, "auto power: raise %u deg/%u ms, still %u ms, face %u, "
-             "screen %u ms",
+    ESP_LOGI(TAG, "auto power: raise %u deg/%u ms, face %u, screen %u ms",
              (unsigned)angle, (unsigned)s_wrist_cfg.hold_ms,
-             (unsigned)s_wrist_cfg.still_before_ms,
              (unsigned)s_wrist_cfg.face_up_milli, (unsigned)screen);
 }
 
@@ -445,8 +452,11 @@ static void diag_stats(mosu_diag_stats_t *out)
     out->screen_ms = mosu_power_learn_screen_ms(&s_power_learn,
                                                 s_cfg.display.screen_on_ms);
     out->hold_ms = mosu_power_learn_hold(&s_power_learn, 250);
-    out->still_ms = mosu_power_learn_still(&s_power_learn, 600);
     out->face_milli = mosu_power_learn_face(&s_power_learn, 200);
+    out->raise_fired = s_raise_fired;
+    out->raise_candidates = s_raise_candidates;
+    out->last_raise_deg = s_last_raise_deg;
+    out->last_nz_milli = s_last_raise_nz_milli;
     out->angle_deg = (uint8_t)mosu_power_learn_angle(
         &s_power_learn, s_cfg.display.motion_angle_deg);
 
@@ -471,6 +481,10 @@ static void diag_stats_reset(void)
     s_boot_pct_set = true;
     s_wake_count = 0;
     s_screen_on_total_ms = 0;
+    s_raise_fired = 0;
+    s_raise_candidates = 0;
+    s_last_raise_deg = 0;
+    s_last_raise_nz_milli = 0;
     s_screen_on_since_ms = now_ms();
 }
 
@@ -692,6 +706,13 @@ void app_main(void)
 
         mosu_accel_t sample = {accel.x, accel.y, accel.z};
         if (mosu_wrist_update(&s_wrist, &sample, &s_wrist_cfg, now_ms())) {
+            s_raise_fired++;
+            s_raise_candidates = s_wrist.candidates;
+            s_last_raise_deg = (uint8_t)(s_wrist.last_angle_deg + 0.5f);
+            s_last_raise_nz_milli = (int16_t)(s_wrist.last_nz * 1000.0f);
+            ESP_LOGI(TAG, "raise: %.0f deg, nz %.2f, %u candidates",
+                     (double)s_wrist.last_angle_deg, (double)s_wrist.last_nz,
+                     (unsigned)s_wrist.candidates);
             screen_on(false);
         }
     }

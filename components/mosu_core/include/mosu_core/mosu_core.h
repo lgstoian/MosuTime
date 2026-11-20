@@ -147,20 +147,26 @@ typedef struct {
     uint16_t refractory_ms;
     /* Adaptive gates; 0 selects the built-in default. */
     uint16_t hold_ms;          /* how long the new orientation must hold */
-    uint16_t still_before_ms;  /* settled time required before the movement */
     uint16_t face_up_milli;    /* |gz| * 1000 that counts as facing the wearer */
 } mosu_wrist_cfg_t;
 
 typedef struct {
     float bx, by, bz;      /* gravity baseline, unit vector */
     float cx, cy, cz;      /* candidate orientation, unit vector */
+    float px, py, pz;      /* previous sample, unit vector */
     bool have_baseline;
+    bool have_prev;
     bool have_candidate;
     bool have_event;
+    bool moving;           /* between the motion onset and the next settled sample */
     uint32_t candidate_ms;
     uint32_t last_event_ms;
-    uint32_t still_ms;     /* time spent settled near the baseline */
+    uint32_t still_ms;     /* time since the last sample-to-sample movement */
     uint32_t last_ms;      /* previous sample time, 0 before the first */
+    /* Diagnostics for the console and the learning policy. */
+    float last_angle_deg;  /* size of the orientation change that fired */
+    float last_nz;         /* screen-normal gravity component when it fired */
+    uint16_t candidates;   /* raise-sized orientation changes seen */
 } mosu_wrist_t;
 
 void mosu_wrist_init(mosu_wrist_t *wrist);
@@ -168,8 +174,19 @@ void mosu_wrist_reset(mosu_wrist_t *wrist);
 
 /*
  * Feed one accelerometer sample.  Returns true on the rising edge of a wrist
- * raise.  The detector compares the gravity direction against a slow-moving
- * baseline, so holding the arm still never retriggers.
+ * raise.
+ *
+ * The detector is deliberately built around the way an arm actually moves.
+ * A raise is a large change of the gravity direction (the arm turns the glass
+ * from vertical to facing the wearer) that then holds still for a moment.
+ * The old version also required the arm to be still *at the sample where the
+ * threshold was crossed*, which a continuous raise can never satisfy: the
+ * threshold is crossed mid-movement, when the stillness timer has just been
+ * reset.  Only a violent shake could jump the threshold in one sample.
+ *
+ * Stillness is still measured, but only to stop the slow baseline from
+ * following the arm during a movement and to decide when a new resting
+ * orientation has settled.
  */
 bool mosu_wrist_update(mosu_wrist_t *wrist, const mosu_accel_t *accel,
                        const mosu_wrist_cfg_t *cfg, uint32_t now_ms);

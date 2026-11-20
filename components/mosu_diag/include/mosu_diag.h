@@ -21,11 +21,14 @@ typedef struct {
     uint16_t battery_mv;
     uint16_t screen_ms;
     uint16_t hold_ms;
-    uint16_t still_ms;
     uint16_t face_milli;
+    uint32_t raise_fired;
+    uint32_t raise_candidates;
+    int16_t last_nz_milli;
     uint8_t battery_pct;
     uint8_t boot_pct;
     uint8_t angle_deg;
+    uint8_t last_raise_deg;
     bool battery_present;
     bool charging;
 } mosu_diag_stats_t;

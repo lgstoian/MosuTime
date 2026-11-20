@@ -6,6 +6,7 @@
  * Build:  cmake -S test/host -B test/host/build && cmake --build test/host/build
  * Run:    ./test/host/build/mosu_tests
  */
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -167,63 +168,159 @@ static void test_tap(void)
     EXPECT(!mosu_tap_update(&tap, &s));
 }
 
+/* Gravity direction for a wrist that has turned `deg` from "arm down, glass
+ * vertical" towards "glass facing the wearer".  The rotation is in the Y-Z
+ * plane, so `deg` is also the angle the detector measures from the baseline. */
+static mosu_accel_t wrist_tilt(float deg)
+{
+    const float r = deg * 3.14159265f / 180.0f;
+    mosu_accel_t a = {0.0f, cosf(r), sinf(r)};
+    return a;
+}
+
+/* Feed `duration_ms` of a held orientation, 20 Hz.  Returns the time a raise
+ * fired, or 0. */
+static uint32_t feed_hold(mosu_wrist_t *wrist, const mosu_wrist_cfg_t *cfg,
+                          uint32_t t, float deg, uint32_t duration_ms)
+{
+    for (uint32_t elapsed = 0; elapsed < duration_ms; elapsed += 50) {
+        mosu_accel_t a = wrist_tilt(deg);
+        t += 50;
+        if (mosu_wrist_update(wrist, &a, cfg, t)) {
+            return t;
+        }
+    }
+    return 0;
+}
+
+/* Feed a continuous raise: a linear ramp from 0 to `peak_deg` over `ramp_ms`,
+ * then the orientation held for `hold_ms`.  This is what a real arm does and
+ * what the old still-before gate could never accept. */
+static uint32_t feed_raise(mosu_wrist_t *wrist, const mosu_wrist_cfg_t *cfg,
+                           uint32_t t, float peak_deg, uint32_t ramp_ms,
+                           uint32_t hold_ms)
+{
+    const uint32_t steps = ramp_ms / 50;
+    for (uint32_t i = 1; i <= steps; i++) {
+        mosu_accel_t a = wrist_tilt(peak_deg * (float)i / (float)steps);
+        t += 50;
+        if (mosu_wrist_update(wrist, &a, cfg, t)) {
+            return t;
+        }
+    }
+    return feed_hold(wrist, cfg, t, peak_deg, hold_ms);
+}
+
 static void test_wrist(void)
 {
     mosu_wrist_cfg_t cfg = {.angle_mdeg = 45000, .refractory_ms = 2500};
     mosu_wrist_t wrist;
+
+    /* A normal, continuous raise: 55 degrees over 300 ms.  The old detector
+     * only fired when the arm jumped the threshold within one sample. */
     mosu_wrist_init(&wrist);
+    uint32_t t = feed_hold(&wrist, &cfg, 0, 0.0f, 1000);
+    EXPECT(t == 0);
+    uint32_t fired = feed_raise(&wrist, &cfg, t, 55.0f, 300, 800);
+    EXPECT(fired != 0);
+    /* It must fire while the arm is at the look, not later. */
+    EXPECT(fired - t <= 300 + 800);
 
-    mosu_accel_t down = {0.0f, 1.0f, 0.0f};   /* arm down, glass vertical */
-    mosu_accel_t up = {0.0f, 0.0f, 1.0f};     /* glass towards the wearer */
-
-    /* Settle for the default 600 ms, then raise. */
-    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 1000));
-    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 1300));
-    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 1600));
-
-    /* The new orientation has to hold for the default 250 ms. */
-    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 1700));
-    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 1850));
-    EXPECT(mosu_wrist_update(&wrist, &up, &cfg, 1950));
-
-    /* Holding the new orientation does not retrigger. */
-    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 3000));
-    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 9000));
-
-    /* A raise that starts while the arm is still moving is ignored. */
+    /* A raise that starts while the arm is still swinging (walking) also
+     * fires: stillness is measured, but it is not a gate. */
     mosu_wrist_init(&wrist);
-    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 1000));
-    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 1100));
-    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 1600));
+    t = 0;
+    for (int i = 0; i < 40; i++) {
+        mosu_accel_t a = wrist_tilt((i % 2) ? 12.0f : -12.0f);
+        t += 50;
+        EXPECT(!mosu_wrist_update(&wrist, &a, &cfg, t));
+    }
+    fired = feed_raise(&wrist, &cfg, t, 55.0f, 300, 800);
+    EXPECT(fired != 0);
 
-    /* Small wobble around the baseline is ignored. */
+    /* A slow raise (50 degrees over 1.2 s) must not be absorbed into the
+     * baseline while the arm is still turning. */
     mosu_wrist_init(&wrist);
-    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 1000));
-    mosu_accel_t wobble = {0.1f, 0.99f, 0.0f};
-    EXPECT(!mosu_wrist_update(&wrist, &wobble, &cfg, 1300));
-    EXPECT(!mosu_wrist_update(&wrist, &wobble, &cfg, 1600));
+    t = feed_hold(&wrist, &cfg, 0, 0.0f, 800);
+    fired = feed_raise(&wrist, &cfg, t, 50.0f, 1200, 600);
+    EXPECT(fired != 0);
 
-    /* Lowering the arm after a real raise respects the refractory. */
-    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 1900));
-    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 2200));
-    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 2500));
-    EXPECT(!mosu_wrist_update(&wrist, &up, &cfg, 2600));
-    EXPECT(mosu_wrist_update(&wrist, &up, &cfg, 2850));
-    EXPECT(!mosu_wrist_update(&wrist, &down, &cfg, 3000));
+    /* A reach that turns the wrist just as far but leaves the glass vertical
+     * is not a glance at the time. */
+    mosu_wrist_init(&wrist);
+    t = feed_hold(&wrist, &cfg, 0, 0.0f, 1000);
+    EXPECT(t == 0);
+    t = 1000;
+    for (int i = 1; i <= 8; i++) {
+        mosu_accel_t a = {sinf((float)i / 8.0f * 1.5707963f), cosf((float)i / 8.0f * 1.5707963f), 0.0f};
+        t += 50;
+        EXPECT(!mosu_wrist_update(&wrist, &a, &cfg, t));
+    }
+    EXPECT(!mosu_wrist_update(&wrist, &(mosu_accel_t){1.0f, 0.0f, 0.0f}, &cfg, t + 50));
+
+    /* Let the vertical (glass sideways) orientation settle and become the new
+     * baseline, then turn the glass up: 90 degrees, ending with the screen
+     * facing the wearer.  This is the recovery path that must not get stuck. */
+    for (int i = 0; i < 80; i++) {
+        mosu_accel_t a = {1.0f, 0.0f, 0.0f};
+        t += 50;
+        EXPECT(!mosu_wrist_update(&wrist, &a, &cfg, t));
+    }
+    uint32_t fire = 0;
+    for (int i = 1; i <= 6; i++) {
+        float r = (float)i / 6.0f * 1.5707963f;
+        mosu_accel_t a = {cosf(r), 0.0f, sinf(r)};
+        t += 50;
+        if (mosu_wrist_update(&wrist, &a, &cfg, t)) {
+            fire = t;
+        }
+    }
+    for (int i = 0; i < 12 && !fire; i++) {
+        mosu_accel_t a = {0.0f, 0.0f, 1.0f};
+        t += 50;
+        if (mosu_wrist_update(&wrist, &a, &cfg, t)) {
+            fire = t;
+        }
+    }
+    EXPECT(fire != 0);
+
+    /* Holding the look after a raise does not retrigger. */
+    mosu_wrist_init(&wrist);
+    t = feed_hold(&wrist, &cfg, 0, 0.0f, 800);
+    fired = feed_raise(&wrist, &cfg, t, 55.0f, 300, 800);
+    EXPECT(fired != 0);
+    EXPECT(!feed_hold(&wrist, &cfg, fired, 55.0f, 8000));
+
+    /* The refractory window rejects a second raise. */
+    mosu_wrist_init(&wrist);
+    t = feed_hold(&wrist, &cfg, 0, 0.0f, 800);
+    fired = feed_raise(&wrist, &cfg, t, 55.0f, 300, 800);
+    EXPECT(fired != 0);
+    /* Lower the arm and raise it again inside the refractory. */
+    t = feed_hold(&wrist, &cfg, fired, 0.0f, 400);
+    t = t ? t : fired + 400;
+    EXPECT(feed_raise(&wrist, &cfg, t, 55.0f, 300, 800) == 0);
+
+    /* Small wobble around the resting orientation never fires. */
+    mosu_wrist_init(&wrist);
+    t = feed_hold(&wrist, &cfg, 0, 0.0f, 800);
+    for (int i = 0; i < 100; i++) {
+        mosu_accel_t a = wrist_tilt((i % 2) ? 3.0f : -3.0f);
+        t += 50;
+        EXPECT(!mosu_wrist_update(&wrist, &a, &cfg, t));
+    }
 
     /* An explicit, looser configuration is honoured at runtime. */
     mosu_wrist_cfg_t loose = {
         .angle_mdeg = 25000,
         .refractory_ms = 2500,
         .hold_ms = 150,
-        .still_before_ms = 250,
         .face_up_milli = 100,
     };
     mosu_wrist_init(&wrist);
-    EXPECT(!mosu_wrist_update(&wrist, &down, &loose, 1000));
-    EXPECT(!mosu_wrist_update(&wrist, &down, &loose, 1300));
-    EXPECT(!mosu_wrist_update(&wrist, &up, &loose, 1400));
-    EXPECT(mosu_wrist_update(&wrist, &up, &loose, 1550));
+    t = feed_hold(&wrist, &cfg, 0, 0.0f, 800);
+    fired = feed_raise(&wrist, &loose, t, 30.0f, 200, 400);
+    EXPECT(fired != 0);
 }
 
 static void test_config(void)

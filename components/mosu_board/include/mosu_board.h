@@ -112,6 +112,13 @@ esp_err_t mosu_board_sdcard_dump_boot(void);
 
 esp_err_t mosu_board_pmu_read(mosu_board_pmu_t *out);
 
+/* AXP2101 rail control.  The board leaves several rails enabled at reset even
+ * though nothing is connected to them; they still burn quiescent current.
+ * mosu_board_pmu_init() switches those off explicitly.  `name` is one of
+ * dcdc1..dcdc5, aldo1..aldo4, bldo1..bldo2, dldo1..dldo2, cpusldo. */
+esp_err_t mosu_board_pmu_rail_set(const char *name, bool on);
+bool mosu_board_pmu_rail_get(const char *name, bool *on);
+
 /* Cut the system rails through the AXP2101.  On battery it does not return;
  * with VBUS present the PMU may keep running to charge the cell. */
 esp_err_t mosu_board_pmu_power_off(void);

@@ -81,6 +81,36 @@ The fitted cell is a 402728 pouch (4.0 x 27 x 28 mm), 3.7 V nominal,
 charge under about two hours from empty. Change `0x62` to `0x04` (100 mA,
 0.25 C) if the cell runs warm; do not exceed 1 C (400 mA, `0x10`).
 
+### PMU rails
+
+The AXP2101 comes out of reset with every rail enabled. Only a few are wired on
+this board, so `mosu_board_pmu_init()` switches the rest off and logs the
+result (`rails: dcdc 0x01, ldo 0x0B/0x00`). The map comes from the Waveshare
+schematic:
+
+| Rail | Voltage | Load | Kept |
+| --- | --- | --- | --- |
+| DCDC1 | 3.3 V | VCC3V3: ESP32-S3, AMOLED VCI/VDDIO, touch, IMU, SD, codec | yes |
+| DCDC2 | 0.9 V | no inductor or load | no |
+| DCDC3 | 1.2 V | no inductor or load | no |
+| DCDC4 | 1.8 V | no inductor or load | no |
+| DCDC5 | — | not connected | no |
+| ALDO1 | 3.3 V | ALDO input / pull-ups | yes |
+| ALDO2 | 3.3 V | DSI_PWR_EN pull-up (display enable) | yes |
+| ALDO3 | 3.3 V | vibration motor (this firmware never drives it) | no |
+| ALDO4 | 1.8 V | board pull-up | yes |
+| BLDO1/2 | 1.2 / 2.8 V | pins left open | no |
+| CPUSLDO | 1.2 V | pin left open | no |
+| DLDO1/2 | switch | pins left open | no |
+
+`pmu` prints every rail, and `pmu rail <name> on|off` changes one without a
+rebuild, so an assumption can be undone on the spot. The saving is only the
+quiescent current of seven idle regulators; it is real but it is not the
+dominant term. It has not been measured with a meter yet.
+
+Bluetooth is compiled out (`CONFIG_BT_ENABLED=n`, asserted in
+`sdkconfig.defaults`); the radio is Wi-Fi only.
+
 ### What dominates
 
 * **At low use**, the always-on housekeeping dominates: light sleep plus the
@@ -89,9 +119,11 @@ charge under about two hours from empty. Change `0x62` to `0x04` (100 mA,
 * **At high use**, the screen-on windows take over. 200 wakes of 15 s at 35 mA
   is 1.2 mA average on its own. `screen_on_ms` and the number of wrist raises
   are the two biggest software levers.
-* **IMU polling** costs about 0.06 mA at 1 Hz, 0.24 mA at 4 Hz, 0.48 mA at 8 Hz
-  and 0.96 mA at 16 Hz under the model's 1.5 ms / 40 mA burst assumption. It
-  buys wrist-raise latency, nothing else.
+* **IMU polling** costs about 0.06 mA at 1 Hz, 0.24 mA at 4 Hz, 0.6 mA at
+  10 Hz and 1.2 mA at 20 Hz under the model's 1.5 ms / 40 mA burst assumption.
+  It buys wrist-raise latency, nothing else. The QMI8658 also has a
+  wake-on-motion interrupt (INT1 is wired to GPIO21) that would let the CPU
+  sleep until the arm moves; that is the next step, not yet implemented.
 * **Wi-Fi** is small on average because it is on for seconds every
   `sync_hours`, but a failed join can take 15 s per configured network, plus
   the geolocation and SNTP timeouts. A watch that cannot reach its network
@@ -113,7 +145,7 @@ The state machine is driven by `main/app_main.c`, with the screen/tap state in
 | State | What is running | Model estimate | Notes |
 | --- | --- | --- | --- |
 | Screen off, idle | Panel off, LVGL tick stopped, radio off, CPU in automatic light sleep, touch INT armed as a GPIO wake source | ~2.1 mA (0.6 sleep + 1.5 touch) | The floor. No rendering, no polling of the panel. |
-| Screen off, IMU polling | The above, plus one accelerometer read every `1000 / motion_poll_hz` ms | ~2.2 mA at 1 Hz, ~2.3 at 4 Hz, ~2.6 at 8 Hz, ~3.1 at 16 Hz | The IMU runs at a 21 Hz low-power ODR and is only read on the poll; the burst is short. |
+| Screen off, IMU polling | The above, plus one accelerometer read every `1000 / motion_poll_hz` ms | ~2.4 mA at 4 Hz, ~2.7 at 10 Hz, ~3.3 at 20 Hz | The IMU runs at a 21 Hz low-power ODR and is only read on the poll; the burst is short. |
 | Touch wake | The touch INT line wakes the CPU; the screen-on window starts | Transient; see screen on | The touch controller itself was already powered. |
 | Screen on | Panel on at `brightness`, LVGL running, CPU capped at 160 MHz with a `NO_LIGHT_SLEEP` lock, touch polled by LVGL | ~35 mA at brightness 55 for the normal face | AMOLED current depends on lit pixels: the face is mostly black, while the `test screen colors` pattern lights much more of the panel and draws more at the same brightness. That pattern is a panel check, not the budget figure. |
 | Speaking | Screen on, ES8311 + PA enabled, I2S clocked, WAV read from SD | ~120 mA while a clip plays, plus the screen | Short bursts. Measure the whole phrase, including gaps. |
@@ -121,7 +153,7 @@ The state machine is driven by `main/app_main.c`, with the screen/tap state in
 
 The point estimates above come from the model. As a sanity band for planning,
 use these **ranges — also estimates, not measurements**: screen off idle
-1.5–3 mA, screen off + IMU at 8 Hz 1.8–4 mA, screen on with the normal face
+1.5–3 mA, screen off + IMU at 10 Hz 2.0–4 mA, screen on with the normal face
 20–60 mA, speaking 80–200 mA, Wi-Fi sync 80–200 mA. They are deliberately wide:
 the low end assumes a better touch controller and panel than the model, the
 high end leaves room for a brighter panel, a louder PA and Wi-Fi retries. A

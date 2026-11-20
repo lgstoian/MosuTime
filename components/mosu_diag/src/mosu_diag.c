@@ -8,6 +8,7 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -394,7 +395,9 @@ static void handle_line(char *line)
     if (!strcmp(line, "help") || !strcmp(line, "?")) {
         printf("commands:\n");
         printf("  status stats [reset] time sync say settime bright vol tap reboot version\n");
-        printf("  i2c pmu rtc imu pm heap tasks display config mem\n");
+        printf("  i2c pmu rtc imu motion [s] pm heap tasks display config mem\n");
+        printf("  pmu rail <name> on|off   (dcdc1..5, aldo1..4, bldo1..2,\n");
+        printf("                            dldo1..2, cpusldo)\n");
         printf("  test screen [colors|grid|corners|off] | scene clock|blank\n");
         printf("  test touch | test audio | sd remount | sd verbose | sd dump\n");
         printf("  sd format yes | receive <path> <size> [/crc] | md <path>\n");
@@ -472,11 +475,12 @@ static void handle_line(char *line)
         printf("power : %u mV, %u%%, charging %d, boot %u%%\n",
                (unsigned)stats.battery_mv, (unsigned)stats.battery_pct,
                (int)stats.charging, (unsigned)stats.boot_pct);
-        printf("auto  : screen %u s, raise %u deg/%u ms, still %u ms, "
-               "face %u/1000\n",
+        printf("auto  : screen %u s, raise %u deg/%u ms, face %u/1000\n",
                (unsigned)(stats.screen_ms / 1000u), (unsigned)stats.angle_deg,
-               (unsigned)stats.hold_ms, (unsigned)stats.still_ms,
-               (unsigned)stats.face_milli);
+               (unsigned)stats.hold_ms, (unsigned)stats.face_milli);
+        printf("raise : %u fired / %u candidates, last %u deg, nz %d/1000\n",
+               (unsigned)stats.raise_fired, (unsigned)stats.raise_candidates,
+               (unsigned)stats.last_raise_deg, (int)stats.last_nz_milli);
         if (!stats.charging && stats.battery_present && stats.uptime_s > 600 &&
             stats.boot_pct > stats.battery_pct) {
             const unsigned used = stats.boot_pct - stats.battery_pct;
@@ -563,10 +567,63 @@ static void handle_line(char *line)
         }
     } else if (!strcmp(line, "pmu")) {
         mosu_board_pmu_dump();
+    } else if (!strncmp(line, "pmu rail ", 9)) {
+        char name[16] = {0};
+        char state[8] = {0};
+        if (sscanf(line + 9, "%15s %7s", name, state) == 2 &&
+            (!strcmp(state, "on") || !strcmp(state, "off"))) {
+            const bool on = !strcmp(state, "on");
+            esp_err_t err = mosu_board_pmu_rail_set(name, on);
+            printf("pmu : %s %s (%s)\n", name, on ? "on" : "off",
+                   esp_err_to_name(err));
+        } else {
+            printf("usage: pmu rail <dcdc1..5|aldo1..4|bldo1..2|dldo1..2|"
+                   "cpusldo> on|off\n");
+        }
     } else if (!strcmp(line, "rtc")) {
         mosu_board_rtc_dump();
     } else if (!strcmp(line, "imu")) {
         mosu_board_imu_dump();
+    } else if (!strcmp(line, "motion") || !strncmp(line, "motion ", 7)) {
+        int seconds = 10;
+        if (strlen(line) > 7) {
+            seconds = atoi(line + 7);
+        }
+        if (seconds < 1) {
+            seconds = 1;
+        } else if (seconds > 60) {
+            seconds = 60;
+        }
+        mosu_wrist_cfg_t cfg = {
+            .angle_mdeg = (uint16_t)(s_cfg->display.motion_angle_deg * 1000u),
+            .refractory_ms = s_cfg->display.motion_refractory_ms,
+        };
+        mosu_wrist_t wrist;
+        mosu_wrist_init(&wrist);
+        printf("motion: %.0f deg gate, %.1f s of samples; move the arm\n",
+               (double)s_cfg->display.motion_angle_deg, (double)seconds);
+        uint32_t t = 0;
+        for (int i = 0; i < seconds * 20; i++) {
+            vTaskDelay(pdMS_TO_TICKS(50));
+            t += 50;
+            mosu_board_accel_t accel;
+            if (mosu_board_imu_read(&accel) != ESP_OK) {
+                continue;
+            }
+            mosu_accel_t sample = {accel.x, accel.y, accel.z};
+            const bool fired = mosu_wrist_update(&wrist, &sample, &cfg, t);
+            if (fired || (i % 10) == 0) {
+                printf("motion: %5.2f %5.2f %5.2f  nz %5.2f  %s\n",
+                       (double)accel.x, (double)accel.y, (double)accel.z,
+                       (double)(accel.z /
+                                sqrtf(accel.x * accel.x + accel.y * accel.y +
+                                      accel.z * accel.z + 1e-6f)),
+                       fired ? "RAISE" : "");
+            }
+        }
+        printf("motion: %u candidates, last %.0f deg, nz %.2f\n",
+               (unsigned)wrist.candidates, (double)wrist.last_angle_deg,
+               (double)wrist.last_nz);
     } else if (!strcmp(line, "pm")) {
         mosu_board_pm_dump();
     } else if (!strcmp(line, "heap")) {

@@ -72,3 +72,6 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 
 # Let Wi-Fi/LWIP large buffers spill into PSRAM; internal RAM stays for DMA.
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+
+# No Bluetooth: the watch uses Wi-Fi only, for the time sync.
+CONFIG_BT_ENABLED=n

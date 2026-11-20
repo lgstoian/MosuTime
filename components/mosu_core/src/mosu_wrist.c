@@ -4,9 +4,21 @@
  *
  * Wrist raise detection from the accelerometer alone.
  *
- * A raise is a large, *stable* change of the gravity direction.  Requiring the
- * new orientation to persist for a moment removes almost all false positives
- * from ordinary hand movements and from setting the arm down.
+ * The watch shows the time when the wearer turns the glass towards his face.
+ * That is a large change of the gravity direction which then *holds* for a
+ * moment; the direction is all an accelerometer can see, so the shape of the
+ * movement is the signal:
+ *
+ *   1. the orientation departs from the resting baseline by a real angle,
+ *   2. the new orientation stops changing (the arm has reached the look),
+ *   3. it stays there for `hold_ms`,
+ *   4. the screen normal is not vertical (the glass faces up, not the wall),
+ *   5. the refractory window has passed.
+ *
+ * Stillness before the movement is still measured, but it is *not* a gate.
+ * A continuous raise crosses the angle threshold while the arm is moving, and
+ * a gate evaluated at that instant can never be satisfied; that bug is what
+ * made the watch respond only to a hard shake.
  */
 #include <math.h>
 #include <string.h>
@@ -14,11 +26,26 @@
 #include "mosu_core/mosu_core.h"
 
 #define MOSU_WRIST_HOLD_MS 250
-#define MOSU_WRIST_HOLD_DEG 20.0f
-#define MOSU_WRIST_STILL_DEG 12.0f
-#define MOSU_WRIST_STILL_BEFORE_MS 600
+#define MOSU_WRIST_HOLD_DEG 18.0f
 #define MOSU_WRIST_FACE_UP_MIN 0.20f
-#define MOSU_WRIST_BASELINE_ALPHA 0.05f
+/* Sample-to-sample change that means "the arm is moving".  At 20 Hz a natural
+ * raise moves about 8 degrees per sample, ordinary hand tremor about 1. */
+#define MOSU_WRIST_MOVE_DEG 6.0f
+/* Linear acceleration that means the arm is moving even when the direction
+ * happens to be unchanged. */
+#define MOSU_WRIST_MOVE_G 0.12f
+/* Only follow the resting orientation once the arm has really settled, so a
+ * slow raise is not absorbed into the baseline before it is recognised.  The
+ * tracking also stops once the sample is this far from the baseline: at a high
+ * sample rate a slow raise moves less than MOVE_DEG per sample and would
+ * otherwise be tracked away. */
+#define MOSU_WRIST_SETTLE_MS 500
+#define MOSU_WRIST_TRACK_DEG 10.0f
+/* A new orientation that is not a raise (glass vertical, or still inside the
+ * refractory window) becomes the resting baseline after this long, otherwise
+ * the detector would keep measuring against an old arm position forever. */
+#define MOSU_WRIST_ADOPT_MS 1500
+#define MOSU_WRIST_BASELINE_ALPHA 0.10f
 #define MOSU_RAD_TO_DEG 57.2957795f
 
 void mosu_wrist_init(mosu_wrist_t *wrist)
@@ -35,8 +62,11 @@ void mosu_wrist_reset(mosu_wrist_t *wrist)
         return;
     }
     wrist->have_baseline = false;
+    wrist->have_prev = false;
     wrist->have_candidate = false;
+    wrist->moving = false;
     wrist->candidate_ms = 0;
+    wrist->last_event_ms = 0;
     wrist->still_ms = 0;
     wrist->last_ms = 0;
 }
@@ -74,7 +104,11 @@ bool mosu_wrist_update(mosu_wrist_t *wrist, const mosu_accel_t *accel,
         wrist->bx = nx;
         wrist->by = ny;
         wrist->bz = nz;
+        wrist->px = nx;
+        wrist->py = ny;
+        wrist->pz = nz;
         wrist->have_baseline = true;
+        wrist->have_prev = true;
         wrist->last_ms = now_ms;
         return false;
     }
@@ -85,47 +119,60 @@ bool mosu_wrist_update(mosu_wrist_t *wrist, const mosu_accel_t *accel,
         dt = 1000u;
     }
 
-    if ((int32_t)(now_ms - wrist->last_event_ms) <
-        -(int32_t)cfg->refractory_ms) {
-        wrist->last_event_ms = now_ms;
+    /* Motion is a change from the previous sample, not a distance from the
+     * baseline: an arm that swings while walking is moving even though it
+     * keeps returning to roughly the same orientation. */
+    float step = 0.0f;
+    if (wrist->have_prev) {
+        step = angle_between(nx, ny, nz, wrist->px, wrist->py, wrist->pz);
     }
+    const bool motion =
+        step >= MOSU_WRIST_MOVE_DEG || fabsf(magnitude - 1.0f) >= MOSU_WRIST_MOVE_G;
+
+    if (motion) {
+        wrist->moving = true;
+        wrist->still_ms = 0;
+    } else {
+        wrist->moving = false;
+        wrist->still_ms = wrist->still_ms + dt > 60000u ? 60000u
+                                                        : wrist->still_ms + dt;
+    }
+    wrist->px = nx;
+    wrist->py = ny;
+    wrist->pz = nz;
+    wrist->have_prev = true;
 
     bool refractory =
         wrist->have_event &&
         (uint32_t)(now_ms - wrist->last_event_ms) < cfg->refractory_ms;
 
-    float threshold = (float)cfg->angle_mdeg / 1000.0f;
+    const float threshold = (float)cfg->angle_mdeg / 1000.0f;
     const uint32_t hold_ms = cfg->hold_ms ? cfg->hold_ms : MOSU_WRIST_HOLD_MS;
-    const uint32_t still_before_ms =
-        cfg->still_before_ms ? cfg->still_before_ms : MOSU_WRIST_STILL_BEFORE_MS;
     const float face_up_min = cfg->face_up_milli
                                   ? (float)cfg->face_up_milli / 1000.0f
                                   : MOSU_WRIST_FACE_UP_MIN;
-    float from_baseline =
+    const float from_baseline =
         angle_between(nx, ny, nz, wrist->bx, wrist->by, wrist->bz);
 
-    /* A raise starts from a still arm.  Remember how long the watch has been
-     * settled before this sample; a movement that begins while the arm is
-     * already moving is a gesture, not a glance at the time. */
-    const uint32_t still_before = wrist->still_ms;
-    if (from_baseline < MOSU_WRIST_STILL_DEG) {
-        wrist->still_ms = wrist->still_ms + dt > 60000u
-                              ? 60000u
-                              : wrist->still_ms + dt;
-    } else {
-        wrist->still_ms = 0;
-    }
-
     if (!wrist->have_candidate) {
-        if (!refractory && from_baseline >= threshold &&
-            still_before >= still_before_ms) {
+        if (!refractory && from_baseline >= threshold) {
+            /* The wrist has turned far enough.  Remember the orientation and
+             * start the hold timer; a raise that is still in progress will
+             * keep replacing the candidate until the arm stops. */
             wrist->have_candidate = true;
             wrist->cx = nx;
             wrist->cy = ny;
             wrist->cz = nz;
             wrist->candidate_ms = now_ms;
-        } else if (from_baseline < MOSU_WRIST_STILL_DEG) {
-            /* Slow baseline tracking while the arm is basically still. */
+            wrist->candidates++;
+            return false;
+        }
+
+        /* Settled and close to the baseline: let the baseline follow slowly.
+         * The settle delay and the distance limit keep a slow raise from being
+         * absorbed while the arm is still turning. */
+        if (!motion && wrist->still_ms >= MOSU_WRIST_SETTLE_MS &&
+            from_baseline < MOSU_WRIST_TRACK_DEG) {
             wrist->bx += (nx - wrist->bx) * MOSU_WRIST_BASELINE_ALPHA;
             wrist->by += (ny - wrist->by) * MOSU_WRIST_BASELINE_ALPHA;
             wrist->bz += (nz - wrist->bz) * MOSU_WRIST_BASELINE_ALPHA;
@@ -140,17 +187,19 @@ bool mosu_wrist_update(mosu_wrist_t *wrist, const mosu_accel_t *accel,
         return false;
     }
 
-    float from_candidate =
+    const float from_candidate =
         angle_between(nx, ny, nz, wrist->cx, wrist->cy, wrist->cz);
 
     if (from_candidate <= MOSU_WRIST_HOLD_DEG) {
-        /* Looking at the watch means the glass turns towards the wearer: the
-         * gravity vector ends up along the screen normal.  Reaching for an
-         * object can rotate the wrist just as far but keeps the face
-         * vertical, so this is what separates a glance from a gesture. */
-        if ((uint32_t)(now_ms - wrist->candidate_ms) >= hold_ms &&
-            !refractory && fabsf(nz) >= face_up_min) {
-            /* The new orientation held: this is a raise. */
+        const uint32_t held_ms = (uint32_t)(now_ms - wrist->candidate_ms);
+        /* The arm has stopped near the candidate orientation.  The glass must
+         * face the wearer: a reach across a table turns the wrist just as far
+         * but leaves the screen normal horizontal. */
+        if (held_ms >= hold_ms && !refractory && fabsf(nz) >= face_up_min) {
+            wrist->last_angle_deg =
+                angle_between(wrist->cx, wrist->cy, wrist->cz, wrist->bx,
+                              wrist->by, wrist->bz);
+            wrist->last_nz = nz;
             wrist->bx = wrist->cx;
             wrist->by = wrist->cy;
             wrist->bz = wrist->cz;
@@ -160,10 +209,21 @@ bool mosu_wrist_update(mosu_wrist_t *wrist, const mosu_accel_t *accel,
             wrist->still_ms = 0;
             return true;
         }
+
+        /* This orientation is not a raise: the glass is vertical, or the
+         * refractory window is still running.  Once it has held, take it as
+         * the new resting orientation so the next raise is measured from the
+         * arm position the wearer is actually in. */
+        if (held_ms >= MOSU_WRIST_ADOPT_MS && !motion) {
+            wrist->bx = wrist->cx;
+            wrist->by = wrist->cy;
+            wrist->bz = wrist->cz;
+            wrist->have_candidate = false;
+        }
         return false;
     }
 
-    /* The arm kept moving: restart the candidate at the current orientation. */
+    /* Still moving: restart the candidate at the current orientation. */
     wrist->cx = nx;
     wrist->cy = ny;
     wrist->cz = nz;

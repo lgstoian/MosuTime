@@ -22,7 +22,8 @@ For the product constraints and the rules of the road, read
 | Change what the watch says or which clips it joins | [`components/mosu_core/src/mosu_phrase.c`](components/mosu_core/src/mosu_phrase.c), [`docs/voice.md`](docs/voice.md) |
 | Change tap, double-tap, hold or cooldown behaviour | [`components/mosu_session/src/mosu_session.c`](components/mosu_session/src/mosu_session.c), [`components/mosu_core/src/mosu_tap.c`](components/mosu_core/src/mosu_tap.c) |
 | Change when the screen turns off, or how a touch extends it | [`components/mosu_session/src/mosu_session.c`](components/mosu_session/src/mosu_session.c), [`main/app_main.c`](main/app_main.c) |
-| Change wrist-raise sensitivity or the IMU poll | [`components/mosu_core/src/mosu_wrist.c`](components/mosu_core/src/mosu_wrist.c), `display.motion_*` in [`sd_card/mosu.cfg`](sd_card/mosu.cfg) |
+| Change wrist-raise sensitivity or the IMU poll | [`components/mosu_core/src/mosu_wrist.c`](components/mosu_core/src/mosu_wrist.c), `display.motion_*` in [`sd_card/mosu.cfg`](sd_card/mosu.cfg), `motion [s]` on the console |
+| Check or change a PMU rail | [`components/mosu_board/src/mosu_board_i2c.c`](components/mosu_board/src/mosu_board_i2c.c) (`s_rails`), `pmu` and `pmu rail <name> on|off` |
 | Change power states, sleep or the CPU limits | [`components/mosu_power/src/mosu_power.c`](components/mosu_power/src/mosu_power.c), [`docs/power.md`](docs/power.md) |
 | Port to another board or change the hardware contract | [`components/mosu_hal/include/mosu_hal.h`](components/mosu_hal/include/mosu_hal.h), [`components/mosu_hal/src/mosu_hal_board.c`](components/mosu_hal/src/mosu_hal_board.c), [`components/mosu_board`](components/mosu_board) |
 | Add a task or change a stack size | [`components/mosu_tasks/include/mosu_tasks.h`](components/mosu_tasks/include/mosu_tasks.h), `mem` on the console |

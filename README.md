@@ -329,7 +329,8 @@ The USB/UART console is for maintenance, not for the wearer:
 
 ```
 help status time sync say settime bright N vol N tap reboot
-i2c pmu rtc imu pm heap tasks display config mem
+i2c pmu rtc imu motion [s] pm heap tasks display config mem
+pmu rail <dcdc1..5|aldo1..4|bldo1..2|dldo1..2|cpusldo> on|off
 wifi <ssid> <password> | wifi scan | wifi presence | wifi clear
 test screen [colors|grid|corners|off] | test touch | test audio
 scene clock|blank
