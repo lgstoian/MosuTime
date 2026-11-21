@@ -364,8 +364,16 @@ esp_err_t mosu_board_audio_play_wav(const char *path, uint8_t volume)
 
 esp_err_t mosu_board_audio_beep(uint16_t hz, uint16_t ms)
 {
-    if (!s_codec || hz == 0) {
+    if (hz == 0) {
         return ESP_ERR_INVALID_ARG;
+    }
+    /* The codec is torn down between sounds, so rebuild it on demand. */
+    esp_err_t init = mosu_board_audio_init();
+    if (init != ESP_OK) {
+        return init;
+    }
+    if (!s_codec) {
+        return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t err = open_stream(AUDIO_SAMPLE_RATE);
@@ -379,6 +387,11 @@ esp_err_t mosu_board_audio_beep(uint16_t hz, uint16_t ms)
 
 esp_err_t mosu_board_audio_test(void)
 {
+    /* The codec is torn down between sounds, so rebuild it on demand. */
+    esp_err_t init = mosu_board_audio_init();
+    if (init != ESP_OK) {
+        return init;
+    }
     if (!s_codec) {
         return ESP_ERR_INVALID_STATE;
     }
