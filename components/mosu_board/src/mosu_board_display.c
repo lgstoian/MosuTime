@@ -252,7 +252,29 @@ esp_err_t mosu_board_brightness_set(uint8_t percent)
     return esp_lcd_panel_io_tx_param(s_io, (int)cmd, &value, 1);
 }
 
-/* Raw panel command, using the same opcode packing as the brightness call. */
+/* After ALDO2 is cycled the CO5300 loses its register state on this board:
+ * SLPOUT alone is not enough.  Replay the vendor init sequence byte for byte
+ * (the same packing the panel driver uses) after restoring power and resetting
+ * the panel. */
+static void panel_replay_init(void)
+{
+    const size_t count = sizeof(s_init_cmds) / sizeof(s_init_cmds[0]);
+    for (size_t i = 0; i < count; i++) {
+        const sh8601_lcd_init_cmd_t *c = &s_init_cmds[i];
+        const uint32_t packed = ((uint32_t)c->cmd << 8) |
+                                ((uint32_t)LCD_OPCODE_WRITE_CMD << 24);
+        esp_err_t err = esp_lcd_panel_io_tx_param(s_io, (int)packed,
+                                                  c->data, c->data_bytes);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "panel init %02X: %s", (unsigned)c->cmd,
+                     esp_err_to_name(err));
+        }
+        if (c->delay_ms) {
+            vTaskDelay(pdMS_TO_TICKS(c->delay_ms));
+        }
+    }
+}
+
 static esp_err_t panel_cmd(uint8_t op)
 {
     uint32_t cmd = ((uint32_t)op << 8) | ((uint32_t)LCD_OPCODE_WRITE_CMD << 24);
@@ -290,8 +312,10 @@ esp_err_t mosu_board_display_on(void)
         ESP_RETURN_ON_ERROR(mosu_board_pmu_rail_set("aldo2", true), TAG,
                             "display rail");
         vTaskDelay(pdMS_TO_TICKS(50));
-        ESP_RETURN_ON_ERROR(panel_cmd(0x11), TAG, "sleep out");
-        vTaskDelay(pdMS_TO_TICKS(120));
+        /* This panel needs a real reset and the full vendor sequence after
+         * its supply has been removed; a bare 0x11 leaves it dark. */
+        panel_hardware_reset();
+        panel_replay_init();
         panel_fill_black();
     }
     ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(s_panel, true), TAG, "on");
