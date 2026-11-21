@@ -62,6 +62,30 @@ from two assumptions: 0.6 mA in light sleep and 1.5 mA for the touch
 controller. If the measured floor is higher, the runtime drops proportionally;
 the touch controller is the first thing to measure.
 
+## What owners of this board measured
+
+Waveshare issue #6 ("High Baseline Power Consumption During Idle") collected
+meter-backed measurements from several owners of this exact board:
+
+* **ALDO2 is the AMOLED supply switch**, not a pull-up (GPIO13 is TE). SLPIN
+  alone leaves the external ELVDD/ELVSS boost running, costing about 30 mA.
+  Gating ALDO2 on screen-off and restoring it before SLPOUT is the single
+  biggest saving. `display_off()` / `display_on()` now do this.
+* **An initialised I2S channel prevents light sleep on ESP32-S3**, even when
+  idle. `mosu_board_audio_idle()` now deletes the codec and the I2S channel
+  and rebuilds them on the next announcement.
+* **ES8311 REG0D bit2 (PDN_VREF)**: the vendor codec driver writes `0xFA`;
+  keeping the reset value `0xFC` avoids roughly 12 mA of extra sleep current.
+  We patch it after every codec init.
+* **The supplied cell is not 400 mAh.** Two independent charge tests and a
+  meter-backed estimate found roughly 100–200 mAh (the cell measures
+  28.1 × 23.3 × 4.0 mm, not 402728). Runtime estimates based on 400 mAh are
+  wrong by 2–4×. The drain line in `stats` still assumes 400 mAh and must be
+  read as an index, not an absolute current.
+* A separate port (SquachWatch) measured 60–100 mA for an idle Bluetooth
+  controller and ~30 mA for an idle codec; after deinitialising the radios and
+  parking the codec it reached ~23 h. Bluetooth is compiled out of MosuTime.
+
 ## Battery and charger
 
 The fitted cell is a 402728 pouch (4.0 x 27 x 28 mm), 3.7 V nominal,

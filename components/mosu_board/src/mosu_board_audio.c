@@ -28,6 +28,9 @@ static const char *TAG = "mosu_audio";
 
 static i2s_chan_handle_t s_tx;
 static const audio_codec_data_if_t *s_data_if;
+static const audio_codec_ctrl_if_t *s_ctrl_if;
+static const audio_codec_gpio_if_t *s_gpio_if;
+static const audio_codec_if_t *s_codec_if;
 static esp_codec_dev_handle_t s_codec;
 static bool s_channel_enabled;
 
@@ -128,12 +131,14 @@ esp_err_t mosu_board_audio_init(void)
     }
 
     const audio_codec_gpio_if_t *gpio_if = audio_codec_new_gpio();
+    s_gpio_if = gpio_if;
     audio_codec_i2c_cfg_t i2c_cfg = {
         .port = I2C_NUM_0,
         .addr = ES8311_CODEC_DEFAULT_ADDR,
         .bus_handle = mosu_board_i2c_bus(),
     };
     const audio_codec_ctrl_if_t *ctrl_if = audio_codec_new_i2c_ctrl(&i2c_cfg);
+    s_ctrl_if = ctrl_if;
     if (!ctrl_if) {
         return ESP_FAIL;
     }
@@ -158,6 +163,7 @@ esp_err_t mosu_board_audio_init(void)
     };
 
     const audio_codec_if_t *codec_if = es8311_codec_new(&es_cfg);
+    s_codec_if = codec_if;
     if (!codec_if) {
         return ESP_FAIL;
     }
@@ -170,6 +176,19 @@ esp_err_t mosu_board_audio_init(void)
     s_codec = esp_codec_dev_new(&dev_cfg);
     if (!s_codec) {
         return ESP_FAIL;
+    }
+
+    /* The vendor driver writes 0xFA here, clearing ES8311 REG0D bit2
+     * (PDN_VREF).  Owners of this board measured ~12 mA of extra sleep current
+     * with that bit clear; the power-on value 0xFC keeps VREF down properly.
+     * Restore it after every init, since we tear the codec down between
+     * announcements. */
+    uint8_t vref = 0xFC;
+    if (s_ctrl_if && s_ctrl_if->write_reg) {
+        int patch = s_ctrl_if->write_reg(s_ctrl_if, 0x0D, 1, &vref, 1);
+        if (patch != 0) {
+            ESP_LOGW(TAG, "ES8311 VREF patch: %d", patch);
+        }
     }
 
     ESP_LOGI(TAG, "audio ready");
@@ -252,8 +271,34 @@ esp_err_t mosu_board_audio_idle(void)
         return ESP_OK;
     }
     esp_codec_dev_close(s_codec);
-    /* esp_codec_dev_close() has already disabled the I2S channel. */
     s_channel_enabled = false;
+
+    /* An initialised I2S channel prevents light sleep on ESP32-S3 even when
+     * it is idle, and an idle ES8311 costs tens of milliamps on this board.
+     * Tear the whole path down; mosu_board_audio_init() rebuilds it on the
+     * next announcement. */
+    esp_codec_dev_delete(s_codec);
+    s_codec = NULL;
+    if (s_codec_if) {
+        audio_codec_delete_codec_if(s_codec_if);
+        s_codec_if = NULL;
+    }
+    if (s_ctrl_if) {
+        audio_codec_delete_ctrl_if(s_ctrl_if);
+        s_ctrl_if = NULL;
+    }
+    if (s_data_if) {
+        audio_codec_delete_data_if(s_data_if);
+        s_data_if = NULL;
+    }
+    if (s_gpio_if) {
+        audio_codec_delete_gpio_if(s_gpio_if);
+        s_gpio_if = NULL;
+    }
+    if (s_tx) {
+        i2s_del_channel(s_tx);
+        s_tx = NULL;
+    }
     return ESP_OK;
 }
 

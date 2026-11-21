@@ -283,10 +283,13 @@ esp_err_t mosu_board_display_on(void)
         return ESP_OK;
     }
     if (s_panel_sleep) {
-        /* Sleep-in loses the GRAM.  Wake the panel with the display still
-         * off, paint the whole frame black, and only then switch it on: the
-         * wearer sees black for a frame, never the undefined pixels that
-         * caused the white band in v1.1.0. */
+        /* ALDO2 is not a pull-up: it is the AMOLED daughterboard's supply
+         * switch (the boost for ELVDD/ELVSS).  SLPIN alone leaves that boost
+         * running and costs about 30 mA.  Gate it here; re-enable it before
+         * the panel is woken. */
+        ESP_RETURN_ON_ERROR(mosu_board_pmu_rail_set("aldo2", true), TAG,
+                            "display rail");
+        vTaskDelay(pdMS_TO_TICKS(50));
         ESP_RETURN_ON_ERROR(panel_cmd(0x11), TAG, "sleep out");
         vTaskDelay(pdMS_TO_TICKS(120));
         panel_fill_black();
@@ -323,6 +326,12 @@ esp_err_t mosu_board_display_off(void)
         esp_err_t err = panel_cmd(0x10);
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "panel sleep in: %s", esp_err_to_name(err));
+        }
+        /* Gate the panel supply (ALDO2) after SLPIN.  The CO5300 logic stays
+         * powered from ALDO1, so its registers survive. */
+        err = mosu_board_pmu_rail_set("aldo2", false);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "panel rail off: %s", esp_err_to_name(err));
         }
     }
     s_display_on = false;
