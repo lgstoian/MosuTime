@@ -105,6 +105,9 @@ static mosu_session_t s_session;
 static portMUX_TYPE s_session_mux = portMUX_INITIALIZER_UNLOCKED;
 static mosu_wrist_t s_wrist;
 static mosu_wrist_cfg_t s_wrist_cfg;
+/* Audit kill switches for the one-hour A/B discharge runs. */
+static bool s_audit_imu = true;
+static bool s_audit_touch = true;
 
 static uint32_t now_ms(void)
 {
@@ -462,6 +465,8 @@ static void diag_stats(mosu_diag_stats_t *out)
     out->face_milli = mosu_power_learn_face(&s_power_learn, 200);
     out->raise_fired = s_raise_fired;
     out->raise_candidates = s_raise_candidates;
+    out->wifi_on_s = mosu_net_wifi_on_ms() / 1000u;
+    out->audio_on_s = mosu_audio_on_ms() / 1000u;
     out->last_raise_deg = s_last_raise_deg;
     out->last_nz_milli = s_last_raise_nz_milli;
     out->angle_deg = (uint8_t)mosu_power_learn_angle(
@@ -498,6 +503,48 @@ static void diag_stats_reset(void)
     s_screen_on_since_ms = now_ms();
 }
 
+static void diag_audit(const char *args)
+{
+    char name[16] = {0};
+    char state[8] = {0};
+
+    if (args && *args) {
+        if (sscanf(args, "%15s %7s", name, state) != 2 ||
+            (strcmp(state, "on") && strcmp(state, "off"))) {
+            printf("usage: audit <wifi|imu|touch|audio|panel> on|off\n");
+            return;
+        }
+        const bool on = !strcmp(state, "on");
+        if (!strcmp(name, "wifi")) {
+            mosu_net_set_enabled(on);
+        } else if (!strcmp(name, "audio")) {
+            mosu_audio_set_enabled(on);
+        } else if (!strcmp(name, "imu")) {
+            s_audit_imu = on;
+        } else if (!strcmp(name, "touch")) {
+            s_audit_touch = on;
+            if (s_display_ok) {
+                mosu_board_enable_touch_wake(on &&
+                                             s_cfg.display.wake_on_touch);
+            }
+        } else if (!strcmp(name, "panel")) {
+            mosu_board_display_set_panel_sleep(on);
+        } else {
+            printf("audit: unknown subsystem %s\n", name);
+            return;
+        }
+    }
+
+    printf("audit: wifi %s, imu %s, touch %s, audio %s, panel sleep %s\n",
+           mosu_net_enabled() ? "on" : "off",
+           s_audit_imu ? "on" : "off", s_audit_touch ? "on" : "off",
+           mosu_audio_enabled() ? "on" : "off",
+           mosu_board_display_panel_sleep() ? "on" : "off");
+    printf("audit: radio on %u s, audio on %u s (since boot)\n",
+           (unsigned)(mosu_net_wifi_on_ms() / 1000u),
+           (unsigned)(mosu_audio_on_ms() / 1000u));
+}
+
 static const mosu_diag_hooks_t s_diag_hooks = {
     .wake = diag_wake,
     .screen_on = diag_screen_on,
@@ -507,6 +554,7 @@ static const mosu_diag_hooks_t s_diag_hooks = {
     .power_idle = diag_power_idle,
     .stats = diag_stats,
     .stats_reset = diag_stats_reset,
+    .audit = diag_audit,
 };
 
 static void handle_diag_requests(void)
@@ -706,13 +754,13 @@ void app_main(void)
         touched = mosu_session_take_wake(&s_session);
         taskEXIT_CRITICAL(&s_session_mux);
 
-        if (s_cfg.display.wake_on_touch &&
+        if (s_audit_touch && s_cfg.display.wake_on_touch &&
             (touched || mosu_board_touch_active())) {
             screen_on(true);
             continue;
         }
 
-        if (!s_cfg.display.wake_on_motion) {
+        if (!s_audit_imu || !s_cfg.display.wake_on_motion) {
             continue;
         }
 

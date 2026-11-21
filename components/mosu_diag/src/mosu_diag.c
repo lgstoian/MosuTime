@@ -392,9 +392,19 @@ static void handle_line(char *line)
         return;
     }
 
+    if (!strcmp(line, "audit") || !strncmp(line, "audit ", 6)) {
+        if (!s_hooks.audit) {
+            printf("audit: no hook\n");
+        } else {
+            s_hooks.audit(line[5] ? line + 6 : "");
+        }
+        return;
+    }
+
     if (!strcmp(line, "help") || !strcmp(line, "?")) {
         printf("commands:\n");
-        printf("  status stats [reset] time sync say settime bright vol tap reboot version\n");
+        printf("  status stats [reset] audit [subsystem on|off] time sync\n");
+        printf("  say settime bright vol tap reboot version\n");
         printf("  i2c pmu rtc imu touch motion [s] pm heap tasks display config mem\n");
         printf("  pmu rail <name> on|off   (dcdc1..5, aldo1..4, bldo1..2,\n");
         printf("                            dldo1..2, cpusldo)\n");
@@ -486,6 +496,8 @@ static void handle_line(char *line)
         printf("raise : %u fired / %u candidates, last %u deg, nz %d/1000\n",
                (unsigned)stats.raise_fired, (unsigned)stats.raise_candidates,
                (unsigned)stats.last_raise_deg, (int)stats.last_nz_milli);
+        printf("on    : radio %u s, audio %u s since boot\n",
+               (unsigned)stats.wifi_on_s, (unsigned)stats.audio_on_s);
         if (!stats.charging && stats.battery_present && stats.uptime_s > 600 &&
             stats.boot_pct > stats.battery_pct) {
             const unsigned used = stats.boot_pct - stats.battery_pct;

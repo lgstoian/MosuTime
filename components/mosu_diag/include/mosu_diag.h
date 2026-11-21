@@ -24,6 +24,8 @@ typedef struct {
     uint16_t face_milli;
     uint32_t raise_fired;
     uint32_t raise_candidates;
+    uint32_t wifi_on_s;
+    uint32_t audio_on_s;
     int16_t last_nz_milli;
     uint8_t battery_pct;
     uint8_t boot_pct;
@@ -46,6 +48,8 @@ typedef struct {
     void (*stats)(mosu_diag_stats_t *out);
     /* Start a new measurement window at the current battery percentage. */
     void (*stats_reset)(void);
+    /* Audit switches and status: receives the arguments after "audit". */
+    void (*audit)(const char *args);
 } mosu_diag_hooks_t;
 
 /*

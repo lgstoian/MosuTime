@@ -53,6 +53,11 @@ void mosu_net_request_sync(void);
 /* Seconds until the next scheduled sync attempt. */
 uint32_t mosu_net_seconds_to_sync(void);
 
+/* Audit: total time the radio has been on, and a kill switch for A/B runs. */
+uint32_t mosu_net_wifi_on_ms(void);
+void mosu_net_set_enabled(bool enable);
+bool mosu_net_enabled(void);
+
 #ifdef __cplusplus
 }
 #endif

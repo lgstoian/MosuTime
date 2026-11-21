@@ -40,7 +40,7 @@ For the product constraints and the rules of the road, read
 | Provision Wi-Fi without an SD card | `wifi <ssid> <pass>` in [`components/mosu_diag/src/mosu_diag.c`](components/mosu_diag/src/mosu_diag.c), [`components/mosu_net/src/mosu_net.c`](components/mosu_net/src/mosu_net.c) (`mosu_net_set_network`) |
 | Understand the return-home presence scan | [`components/mosu_net/src/mosu_net.c`](components/mosu_net/src/mosu_net.c) (`home_ap_visible`, `s_next_presence_s`), [`docs/architecture.md`](docs/architecture.md) |
 | Understand the learned Wi-Fi presence interval or screen policy | [`components/mosu_policy/src/mosu_policy.c`](components/mosu_policy/src/mosu_policy.c) (`mosu_wifi_learn_*`, `mosu_power_learn_*`), [`main/app_main.c`](main/app_main.c) (`apply_power_learning`) |
-| Measure the watch's own duty cycle and average current | `stats` / `stats reset` in [`components/mosu_diag/src/mosu_diag.c`](components/mosu_diag/src/mosu_diag.c), [`docs/power.md`](docs/power.md) |
+| Measure the watch's own duty cycle and average current | `stats` / `stats reset` in [`components/mosu_diag/src/mosu_diag.c`](components/mosu_diag/src/mosu_diag.c), [`docs/power.md`](docs/power.md), one-hour A/B procedure in [`docs/audit.md`](docs/audit.md) |
 | Change the IANA-to-POSIX timezone table or fallback | [`components/mosu_time/src/mosu_time.c`](components/mosu_time/src/mosu_time.c), [`components/mosu_policy/src/mosu_policy.c`](components/mosu_policy/src/mosu_policy.c) |
 | Change announcement queueing or clip gaps | [`components/mosu_audio/src/mosu_audio.c`](components/mosu_audio/src/mosu_audio.c) |
 | Add or change a maintenance-console command | [`components/mosu_diag/src/mosu_diag.c`](components/mosu_diag/src/mosu_diag.c), hooks in [`main/app_main.c`](main/app_main.c) |
@@ -129,6 +129,7 @@ replaces [`docs/bringup.md`](docs/bringup.md).
 | [`docs/architecture.md`](docs/architecture.md) | Layers, boot sequence, screen state machine, time/voice/network flow, failure behaviour, porting. |
 | [`docs/bringup.md`](docs/bringup.md) | First-hardware checklist, expected boot log, I2C inventory, screen/touch/audio/Wi-Fi tests, 24 h soak, go/no-go. |
 | [`docs/power.md`](docs/power.md) | Power states, the current model, PPK2 measurement procedure, acceptance targets and open questions. |
+| [`docs/audit.md`](docs/audit.md) | Runtime `audit` kill switches and the one-hour A/B discharge procedure. |
 | [`docs/voice.md`](docs/voice.md) | The 78 clips, Romanian grammar, naming, generation, preview, replacement and licences. |
 | [`docs/maintenance.md`](docs/maintenance.md) | Editing `mosu.cfg`, runtime brightness/volume, changing networks, regenerating voice, USB updates, SD replacement, troubleshooting. |
 | [`docs/release.md`](docs/release.md) | Building and publishing releases: merged firmware image, manager exe, SD card zip, checksums. |

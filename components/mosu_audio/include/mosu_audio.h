@@ -23,6 +23,11 @@ bool mosu_audio_say(const mosu_phrase_t *phrase);
 bool mosu_audio_busy(void);
 void mosu_audio_set_volume(uint8_t volume);
 
+/* Audit: time the audio path has been active, and a kill switch for A/B runs. */
+uint32_t mosu_audio_on_ms(void);
+void mosu_audio_set_enabled(bool enable);
+bool mosu_audio_enabled(void);
+
 #ifdef __cplusplus
 }
 #endif

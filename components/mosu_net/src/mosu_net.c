@@ -52,6 +52,11 @@ static uint32_t s_next_sync_s;
 static uint32_t s_next_presence_s;
 static uint8_t s_last_reason;
 static bool s_last_connected;
+/* Audit-only: the radio is the single largest current spike, so count the
+ * time it is actually on instead of guessing from the sync interval. */
+static uint32_t s_wifi_on_ms;
+static uint32_t s_wifi_on_since;
+static volatile bool s_disabled; /* `audit wifi off` */
 
 /* Presence scans are driven by the learned per-hour score in mosu_policy:
  * 15 minutes when the watch is normally home at this hour, up to 4 hours
@@ -123,6 +128,7 @@ static bool wifi_ensure_started(void)
         return false;
     }
     s_wifi_started = true;
+    s_wifi_on_since = (uint32_t)(esp_timer_get_time() / 1000);
     return true;
 }
 
@@ -318,12 +324,47 @@ static bool sync_clock(void)
 
 static void radio_off_if_possible(void)
 {
+    if (s_wifi_started && s_wifi_on_since) {
+        s_wifi_on_ms +=
+            (uint32_t)(esp_timer_get_time() / 1000) - s_wifi_on_since;
+        s_wifi_on_since = 0;
+    }
     if (s_cfg->clock.wifi_always_on) {
         return;
     }
     esp_wifi_disconnect();
     esp_wifi_stop();
     s_wifi_started = false;
+}
+
+uint32_t mosu_net_wifi_on_ms(void)
+{
+    uint32_t ms = s_wifi_on_ms;
+    if (s_wifi_started && s_wifi_on_since) {
+        ms += (uint32_t)(esp_timer_get_time() / 1000) - s_wifi_on_since;
+    }
+    return ms;
+}
+
+void mosu_net_set_enabled(bool enable)
+{
+    s_disabled = !enable;
+    if (!enable) {
+        s_sync_requested = false;
+        s_next_sync_s = 0;
+        s_next_presence_s = 0;
+        radio_off_if_possible();
+    } else {
+        s_sync_requested = true;
+        if (s_task) {
+            xTaskNotifyGive(s_task);
+        }
+    }
+}
+
+bool mosu_net_enabled(void)
+{
+    return !s_disabled;
 }
 
 static bool run_sync(void)
@@ -408,6 +449,7 @@ static bool home_ap_visible(void)
     taskEXIT_CRITICAL(&s_cfg_mux);
 
     if (count == 0 || !wifi_ensure_started()) {
+        radio_off_if_possible();
         return false;
     }
 
@@ -456,6 +498,11 @@ static void net_task(void *arg)
     mosu_wifi_learn_init(&learn);
 
     for (;;) {
+        if (s_disabled) {
+            /* Audit switch: no scheduled sync, no scans, radio parked. */
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(60000));
+            continue;
+        }
         uint32_t now = uptime_s();
         struct tm local;
         mosu_time_now(&local);

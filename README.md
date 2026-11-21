@@ -330,8 +330,8 @@ The USB/UART console is for maintenance, not for the wearer:
 ```
 help status time sync say settime bright N vol N tap reboot
 i2c pmu rtc imu touch motion [s] pm heap tasks display config mem
-touch rate <monitor ms> <enter s> | pmu rail <name> on|off
-wifi <ssid> <password> | wifi scan | wifi presence | wifi clear
+audit [wifi|imu|touch|audio|panel on|off] | touch rate <ms> <s>
+pmu rail <name> on|off | wifi <ssid> <password> | wifi scan | wifi presence
 test screen [colors|grid|corners|off] | test touch | test audio
 scene clock|blank
 screenshot [path] | sd remount | sd verbose | sd dump

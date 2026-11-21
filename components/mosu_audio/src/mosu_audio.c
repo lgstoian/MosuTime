@@ -17,6 +17,7 @@
 
 #include "esp_log.h"
 #include "esp_pm.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -32,6 +33,10 @@ static QueueHandle_t s_queue;
 static esp_pm_lock_handle_t s_pm_lock;
 static volatile bool s_busy;
 static volatile uint8_t s_volume;
+/* Audit: time the codec/PA path has been active. */
+static uint32_t s_audio_on_ms;
+static uint32_t s_audio_on_since;
+static volatile bool s_disabled;
 
 typedef struct {
     mosu_phrase_t phrase;
@@ -104,6 +109,7 @@ static void audio_task(void *arg)
         }
 
         s_busy = true;
+        s_audio_on_since = (uint32_t)(esp_timer_get_time() / 1000);
         if (s_pm_lock) {
             esp_pm_lock_acquire(s_pm_lock);
         }
@@ -121,6 +127,11 @@ static void audio_task(void *arg)
 
         mosu_board_audio_idle();
 
+        if (s_audio_on_since) {
+            s_audio_on_ms +=
+                (uint32_t)(esp_timer_get_time() / 1000) - s_audio_on_since;
+            s_audio_on_since = 0;
+        }
         if (s_pm_lock) {
             esp_pm_lock_release(s_pm_lock);
         }
@@ -130,7 +141,8 @@ static void audio_task(void *arg)
 
 bool mosu_audio_say(const mosu_phrase_t *phrase)
 {
-    if (!s_task || !phrase || !phrase->valid || phrase->count == 0) {
+    if (s_disabled || !s_task || !phrase || !phrase->valid ||
+        phrase->count == 0) {
         return false;
     }
 
@@ -155,4 +167,26 @@ void mosu_audio_set_volume(uint8_t volume)
         volume = 100;
     }
     s_volume = volume;
+}
+
+uint32_t mosu_audio_on_ms(void)
+{
+    uint32_t ms = s_audio_on_ms;
+    if (s_audio_on_since) {
+        ms += (uint32_t)(esp_timer_get_time() / 1000) - s_audio_on_since;
+    }
+    return ms;
+}
+
+void mosu_audio_set_enabled(bool enable)
+{
+    s_disabled = !enable;
+    if (!enable) {
+        mosu_board_audio_idle();
+    }
+}
+
+bool mosu_audio_enabled(void)
+{
+    return !s_disabled;
 }
