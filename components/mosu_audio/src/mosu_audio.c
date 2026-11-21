@@ -119,6 +119,9 @@ static void audio_task(void *arg)
         mosu_board_audio_init();
 
         for (uint8_t i = 0; i < request.phrase.count; i++) {
+            if (s_disabled) {
+                break;
+            }
             play_clip(&request.phrase.clips[i]);
             if (i + 1 < request.phrase.count && s_cfg->announce.clip_gap_ms) {
                 vTaskDelay(pdMS_TO_TICKS(s_cfg->announce.clip_gap_ms));
@@ -180,10 +183,9 @@ uint32_t mosu_audio_on_ms(void)
 
 void mosu_audio_set_enabled(bool enable)
 {
+    /* Flag only.  The audio task parks the codec at the end of the current
+     * phrase; driver calls here would race with it on the same I2C bus. */
     s_disabled = !enable;
-    if (!enable) {
-        mosu_board_audio_idle();
-    }
 }
 
 bool mosu_audio_enabled(void)

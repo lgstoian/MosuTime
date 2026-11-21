@@ -108,6 +108,7 @@ static mosu_wrist_cfg_t s_wrist_cfg;
 /* Audit kill switches for the one-hour A/B discharge runs. */
 static bool s_audit_imu = true;
 static bool s_audit_touch = true;
+static bool s_touch_wake_applied = true;
 
 static uint32_t now_ms(void)
 {
@@ -522,11 +523,8 @@ static void diag_audit(const char *args)
         } else if (!strcmp(name, "imu")) {
             s_audit_imu = on;
         } else if (!strcmp(name, "touch")) {
+            /* The app task applies the GPIO wake state on its next pass. */
             s_audit_touch = on;
-            if (s_display_ok) {
-                mosu_board_enable_touch_wake(on &&
-                                             s_cfg.display.wake_on_touch);
-            }
         } else if (!strcmp(name, "panel")) {
             mosu_board_display_set_panel_sleep(on);
         } else {
@@ -680,6 +678,16 @@ void app_main(void)
 
     for (;;) {
         handle_diag_requests();
+        /* Audit touch switch: apply only on change, on the task that owns the
+         * touch GPIO.  Calling the driver from the console task hung the
+         * board. */
+        if (s_audit_touch != s_touch_wake_applied) {
+            s_touch_wake_applied = s_audit_touch;
+            if (s_display_ok) {
+                mosu_board_enable_touch_wake(
+                    s_touch_wake_applied && s_cfg.display.wake_on_touch);
+            }
+        }
         uint32_t now = now_ms();
 
         uint32_t dt = now - s_power_last_ms;

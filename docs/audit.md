@@ -24,7 +24,10 @@ find it by subtraction.
 | `audit <subsystem> on` | Restore it. |
 
 The switches are runtime only. Opening the USB console resets the CPU, so set
-the switch **every time** before starting a run.
+the switch **every time** before starting a run. They only set flags: the
+driver work is done by the task that owns that driver, never by the console
+task. (Calling `esp_wifi_stop`, `gpio_set_intr_type` or `esp_codec_dev_close`
+from the console task deadlocked the board in an earlier build.)
 
 ## Procedure
 

@@ -353,7 +353,11 @@ void mosu_net_set_enabled(bool enable)
         s_sync_requested = false;
         s_next_sync_s = 0;
         s_next_presence_s = 0;
-        radio_off_if_possible();
+        /* Do not touch the Wi-Fi driver here: this runs on the console task.
+         * Notify the net task so it parks the radio in its own loop. */
+        if (s_task) {
+            xTaskNotifyGive(s_task);
+        }
     } else {
         s_sync_requested = true;
         if (s_task) {
@@ -499,7 +503,9 @@ static void net_task(void *arg)
 
     for (;;) {
         if (s_disabled) {
-            /* Audit switch: no scheduled sync, no scans, radio parked. */
+            /* Audit switch: no scheduled sync, no scans, radio parked.
+             * This runs on the net task, so it may call the Wi-Fi driver. */
+            radio_off_if_possible();
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(60000));
             continue;
         }
