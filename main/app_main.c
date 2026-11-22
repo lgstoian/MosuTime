@@ -14,13 +14,10 @@
 
 #include "esp_log.h"
 #include "esp_pm.h"
-#include "esp_sleep.h"
 #include "esp_attr.h"
 #include "esp_lvgl_port.h"
 #include "esp_system.h"
 #include "esp_timer.h"
-#include "soc/soc.h"
-#include "soc/usb_serial_jtag_reg.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
@@ -791,16 +788,6 @@ void app_main(void)
     mosu_diag_set_hooks(&s_diag_hooks);
     mosu_diag_start(&s_cfg);
 
-    /* On ESP32-S3 the USB-Serial/JTAG PHY keeps its oscillator running even
-     * with no cable attached, which prevents automatic light sleep.  When we
-     * boot on the cell, power the pad down.  Plugging a cable in resets the
-     * chip and the ROM restores it, so the console still works. */
-    mosu_board_pmu_t boot_pmu;
-    if (mosu_board_pmu_read(&boot_pmu) == ESP_OK && !boot_pmu.vbus_present) {
-        CLEAR_PERI_REG_MASK(USB_SERIAL_JTAG_CONF0_REG,
-                            USB_SERIAL_JTAG_USB_PAD_ENABLE_M);
-        ESP_LOGI(TAG, "USB PHY powered down (battery boot)");
-    }
 
     if (!s_have_ui) {
         ESP_LOGE(TAG, "no watch face: running headless for diagnostics");
@@ -903,16 +890,13 @@ void app_main(void)
         }
 
         /* Screen off: sleep until the next accelerometer sample, the touch
-         * interrupt, or the poll interval, whichever comes first.
-         * Request light sleep explicitly: the idle task was never entering it
-         * on this board, leaving the CPU awake at ~110 mA all night. */
+         * interrupt, or the poll interval, whichever comes first. */
         uint32_t poll_ms = 1000u / s_cfg.display.motion_poll_hz;
         if (poll_ms < 50u) {
             poll_ms = 50u;
         }
 
-        esp_sleep_enable_timer_wakeup((uint64_t)poll_ms * 1000u);
-        esp_light_sleep_start();
+        vTaskDelay(pdMS_TO_TICKS(poll_ms));
 
         bool touched;
         taskENTER_CRITICAL(&s_session_mux);
