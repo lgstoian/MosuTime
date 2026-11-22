@@ -34,7 +34,7 @@ from the console task deadlocked the board in an earlier build.)
 The firmware now appends one line per minute to `/sdcard/power.log`:
 
 ```
-epoch,pct,mV,charging,screen,wakes,boots
+epoch,pct,mV,charging,screen,wakes,boots,sleep_entries
 ```
 
 The card survives a dead cell, so this is the definitive test:

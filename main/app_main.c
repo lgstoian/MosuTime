@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_pm.h"
 #include "esp_attr.h"
 #include "esp_lvgl_port.h"
 #include "esp_system.h"
@@ -97,6 +98,18 @@ typedef struct {
 
 static mosu_pwrlog_t s_last_log;
 
+/* Set by the PM light-sleep callback.  Tells us whether the chip really
+ * sleeps between the app task's 100 ms polls. */
+static volatile uint32_t s_sleep_entries;
+
+static esp_err_t sleep_enter_cb(int64_t sleep_time_us, void *arg)
+{
+    (void)sleep_time_us;
+    (void)arg;
+    s_sleep_entries++;
+    return ESP_OK;
+}
+
 static void power_log_restore(void)
 {
     nvs_handle_t handle;
@@ -153,10 +166,11 @@ static void power_log_sd(void)
         return;
     }
     const bool on = mosu_power_screen_is_on();
-    fprintf(file, "%ld,%u,%u,%d,%d,%u,%u\n", (long)time(NULL),
+    fprintf(file, "%ld,%u,%u,%d,%d,%u,%u,%u\n", (long)time(NULL),
             (unsigned)pmu.percent, (unsigned)pmu.millivolts,
             pmu.charging ? 1 : 0, on ? 1 : 0,
-            (unsigned)s_wake_count, (unsigned)s_boot_count);
+            (unsigned)s_wake_count, (unsigned)s_boot_count,
+            (unsigned)s_sleep_entries);
     fclose(file);
 }
 
@@ -546,6 +560,7 @@ static void diag_stats(mosu_diag_stats_t *out)
     out->raise_candidates = s_raise_candidates;
     out->wifi_on_s = mosu_net_wifi_on_ms() / 1000u;
     out->audio_on_s = mosu_audio_on_ms() / 1000u;
+    ESP_LOGI(TAG, "sleep entries: %u", (unsigned)s_sleep_entries);
     out->last_raise_deg = s_last_raise_deg;
     out->last_nz_milli = s_last_raise_nz_milli;
     out->angle_deg = (uint8_t)mosu_power_learn_angle(
@@ -724,6 +739,14 @@ void app_main(void)
         /* The power manager applies the configured brightness and the
          * CPU/light-sleep policy before anything is drawn. */
         mosu_power_init(&s_cfg);
+        esp_pm_sleep_cbs_register_config_t cbs = {
+            .enter_cb = sleep_enter_cb,
+            .exit_cb = NULL,
+        };
+        esp_err_t cb_err = esp_pm_light_sleep_register_cbs(&cbs);
+        if (cb_err != ESP_OK) {
+            ESP_LOGW(TAG, "sleep callback: %s", esp_err_to_name(cb_err));
+        }
         err = mosu_ui_create(&s_cfg);
         if (err == ESP_OK) {
             s_have_ui = true;
