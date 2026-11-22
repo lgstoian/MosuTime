@@ -14,6 +14,7 @@
 
 #include "esp_log.h"
 #include "esp_pm.h"
+#include "esp_sleep.h"
 #include "esp_attr.h"
 #include "esp_lvgl_port.h"
 #include "esp_system.h"
@@ -902,13 +903,16 @@ void app_main(void)
         }
 
         /* Screen off: sleep until the next accelerometer sample, the touch
-         * interrupt, or the poll interval, whichever comes first. */
+         * interrupt, or the poll interval, whichever comes first.
+         * Request light sleep explicitly: the idle task was never entering it
+         * on this board, leaving the CPU awake at ~110 mA all night. */
         uint32_t poll_ms = 1000u / s_cfg.display.motion_poll_hz;
         if (poll_ms < 50u) {
             poll_ms = 50u;
         }
 
-        vTaskDelay(pdMS_TO_TICKS(poll_ms));
+        esp_sleep_enable_timer_wakeup((uint64_t)poll_ms * 1000u);
+        esp_light_sleep_start();
 
         bool touched;
         taskENTER_CRITICAL(&s_session_mux);
