@@ -29,7 +29,31 @@ driver work is done by the task that owns that driver, never by the console
 task. (Calling `esp_wifi_stop`, `gpio_set_intr_type` or `esp_codec_dev_close`
 from the console task deadlocked the board in an earlier build.)
 
-## Procedure
+## Full discharge to the SD card
+
+The firmware now appends one line per minute to `/sdcard/power.log`:
+
+```
+epoch,pct,mV,charging,screen,wakes,boots
+```
+
+The card survives a dead cell, so this is the definitive test:
+
+1. Charge to 100%, connect USB, confirm `pmu` says `charging no` at 97–100%.
+2. Clear the old run and leave the card ready:
+   ```
+   rm /sdcard/power.log
+   ```
+   (the file is recreated on the next sample)
+3. Unplug and leave it alone until it dies.
+4. Plug back in and read the curve:
+   ```
+   cat /sdcard/power.log
+   ```
+   Each minute's row shows the voltage and how many wakes happened. The slope
+   from 100% to 0% is the honest average current for a 400 mAh cell.
+
+## One-hour A/B runs (older procedure)
 
 1. Charge the watch until `pmu` reports `charging no` at 97–100%.
 2. Plug in, wait for the console prompt, then run:

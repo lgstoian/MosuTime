@@ -15,8 +15,10 @@ extern "C" {
 
 typedef struct {
     uint32_t epoch;
+    uint32_t start_epoch;
     uint16_t mv;
     uint8_t pct;
+    uint8_t start_pct;
 } mosu_power_log_t;
 
 typedef struct {

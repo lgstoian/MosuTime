@@ -9,6 +9,7 @@
  * the time and the timezone.
  */
 #include <stdbool.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "esp_log.h"
@@ -88,8 +89,10 @@ static uint32_t s_power_window_start;
  * five minutes so an overnight run still tells us the drain rate. */
 typedef struct {
     uint32_t epoch;
+    uint32_t start_epoch;
     uint16_t mv;
     uint8_t pct;
+    uint8_t start_pct;
 } mosu_pwrlog_t;
 
 static mosu_pwrlog_t s_last_log;
@@ -116,6 +119,11 @@ static void power_log_store(void)
     if (now < 1600000000) {
         return;
     }
+    if (s_last_log.epoch == 0 || pmu.percent >= s_last_log.pct) {
+        /* First sample after a charge: start a new discharge run. */
+        s_last_log.start_epoch = (uint32_t)now;
+        s_last_log.start_pct = pmu.percent;
+    }
     s_last_log.epoch = (uint32_t)now;
     s_last_log.mv = pmu.millivolts;
     s_last_log.pct = pmu.percent;
@@ -126,6 +134,30 @@ static void power_log_store(void)
     nvs_set_blob(handle, "pwrlog", &s_last_log, sizeof(s_last_log));
     nvs_commit(handle);
     nvs_close(handle);
+}
+
+/* Append one sample per minute to /sdcard/power.log.  The card is
+ * non-volatile, so a full discharge from 100% to empty leaves the whole curve
+ * behind even when RTC memory is lost. */
+static void power_log_sd(void)
+{
+    if (!mosu_board_sdcard_ready()) {
+        return;
+    }
+    mosu_board_pmu_t pmu;
+    if (mosu_board_pmu_read(&pmu) != ESP_OK || !pmu.battery_present) {
+        return;
+    }
+    FILE *file = fopen("/sdcard/power.log", "a");
+    if (!file) {
+        return;
+    }
+    const bool on = mosu_power_screen_is_on();
+    fprintf(file, "%ld,%u,%u,%d,%d,%u,%u\n", (long)time(NULL),
+            (unsigned)pmu.percent, (unsigned)pmu.millivolts,
+            pmu.charging ? 1 : 0, on ? 1 : 0,
+            (unsigned)s_wake_count, (unsigned)s_boot_count);
+    fclose(file);
 }
 
 static void stats_init(void)
@@ -557,8 +589,10 @@ static bool diag_power_log(mosu_power_log_t *out)
     }
     *out = (mosu_power_log_t){
         .epoch = s_last_log.epoch,
+        .start_epoch = s_last_log.start_epoch,
         .mv = s_last_log.mv,
         .pct = s_last_log.pct,
+        .start_pct = s_last_log.start_pct,
     };
     return true;
 }
@@ -744,6 +778,9 @@ void app_main(void)
     uint32_t wifi_poll = 0;
     uint32_t clock_poll = 0;
     uint32_t pwrlog_poll = now_ms();
+    uint32_t sdlog_poll = now_ms();
+
+    power_log_sd();
 
     mosu_power_learn_init(&s_power_learn);
     s_power_last_ms = now_ms();
@@ -766,6 +803,10 @@ void app_main(void)
         if ((uint32_t)(now - pwrlog_poll) >= 300000u) {
             power_log_store();
             pwrlog_poll = now;
+        }
+        if (sdlog_poll == 0 || (uint32_t)(now - sdlog_poll) >= 60000u) {
+            power_log_sd();
+            sdlog_poll = now;
         }
 
         uint32_t dt = now - s_power_last_ms;

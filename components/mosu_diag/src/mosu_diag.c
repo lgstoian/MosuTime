@@ -411,7 +411,8 @@ static void handle_line(char *line)
         printf("  test screen [colors|grid|corners|off] | scene clock|blank\n");
         printf("  test touch | test audio | sd remount | sd verbose | sd dump\n");
         printf("  sd format yes | receive <path> <size> [/crc] | md <path>\n");
-        printf("  ls [path] | rm <path> | rx bench <bytes>\n");
+        printf("  ls [path] | rm <path> | cat <path> | sd dump\n");
+        printf("  md <path> | rx bench <bytes>\n");
         printf("  wifi <ssid> <password> | scan | presence | clear | status\n");
         printf("  screenshot [path] | power screen on|off | power panel on|off |\n");
         printf("  power wifi | power idle | poweroff | nvs erase\n");
@@ -433,6 +434,17 @@ static void handle_line(char *line)
             return;
         }
         rx_bench(size);
+    } else if (!strncmp(line, "cat ", 4)) {
+        FILE *file = fopen(line + 4, "r");
+        if (!file) {
+            printf("cat %s: %s\n", line + 4, strerror(errno));
+            return;
+        }
+        char buffer[256];
+        while (fgets(buffer, sizeof(buffer), file)) {
+            printf("%s", buffer);
+        }
+        fclose(file);
     } else if (!strncmp(line, "md ", 3) || !strncmp(line, "mkdir ", 6)) {
         const char *path =
             !strncmp(line, "mkdir ", 6) ? line + 6 : line + 3;
@@ -501,8 +513,9 @@ static void handle_line(char *line)
         if (s_hooks.power_log) {
             mosu_power_log_t log;
             if (s_hooks.power_log(&log) && log.epoch) {
-                printf("log   : last %u%% at epoch %u (%u mV)\n",
-                       (unsigned)log.pct, (unsigned)log.epoch,
+                printf("log   : %u%% -> %u%% between epoch %u and %u (%u mV)\n",
+                       (unsigned)log.start_pct, (unsigned)log.pct,
+                       (unsigned)log.start_epoch, (unsigned)log.epoch,
                        (unsigned)log.mv);
             }
         }
