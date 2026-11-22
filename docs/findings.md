@@ -967,8 +967,17 @@ spinning loop in our code. Two contributors were found and removed:
 
 **Verification.** In a two-minute unplugged run after the LVGL change,
 `sleep_entries` rose from 0 to 1203 (roughly 10 sleeps/s, matching the 100 ms
-IMU poll) and the cell stayed at 99% with the voltage flat. Ten off/on cycles
-and a screenshot confirmed the face still wakes and draws correctly.
+IMU poll) and the cell stayed at 99% with the voltage flat. After the final
+LVGL wait-floor fix, a three-minute run reached 5131 sleeps with the cell still
+at 99% and 4154 mV — at the old ~110 mA that window would have dropped ~1.5%.
+A 90-second plugged-in test with the face off confirmed the console stays
+responsive: the firmware holds a `NO_LIGHT_SLEEP` lock while VBUS is present
+and releases it on battery (USB Serial/JTAG cannot wake the chip from light
+sleep on this board). Ten off/on cycles and a screenshot confirmed the face
+still wakes and draws correctly.
+
+Runtime has not yet been measured from 100% to empty with the final firmware;
+`/sdcard/power.log` is cleared and armed for that optional confirmation.
 
 ## Adding a finding
 
