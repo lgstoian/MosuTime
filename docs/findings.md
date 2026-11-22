@@ -51,6 +51,7 @@ changed to make the emulator work.
 | 32 | AXP2101 left eight unused rails enabled | yes: rail dump | done: rails off, I2C/SD/audio still pass |
 | 33 | Background logs and polling kept a task awake | yes | done: quiet profile, 100 panel cycles |
 | 34 | Panel sleep-in loses the GRAM and can flash white | yes: 100 cycles | done: black fill before display-on |
+| 35 | Watch ran ~110 mA with the face off: LVGL task kept core 1 awake | yes: SD log + sleep counter | done: suspend LVGL task while off |
 
 ## 1. SD mount blocking boot
 
@@ -938,6 +939,36 @@ flashes, set `panel_sleep = false` in `mosu.cfg`.
 **Verification.** 130 forced off/on cycles with sleep-in enabled, no hang, and
 a complete 410x502 screenshot afterwards. The absence of a white flash is a
 visual check for the wearer.
+
+## 35. The watch drew ~110 mA with the face off
+
+**Symptom.** The SD power log showed 91% → 35% in 1.73 h (about 129 mA on a
+400 mAh cell) with the screen off for every sample and only one wake in that
+time. A later run showed 90% → 47% in 1.57 h (110 mA), again screen-off.
+
+**Cause.** `sleep_entries` — counted by a PM light-sleep enter callback — stayed
+at 0 for the whole discharge. Every `NO_LIGHT_SLEEP` lock was inactive and the
+per-task run-time stats showed no runaway task, so this was not a lock or a
+spinning loop in our code. Two contributors were found and removed:
+
+1. `esp_wifi_init()` registers a skip-light-sleep callback
+   (`esp_wifi_internal_is_tsf_active`) that `esp_wifi_stop()` does not remove;
+   only `esp_wifi_deinit()` does. We now deinit the driver after every sync and
+   reinit it before the next one.
+2. The LVGL port task ("taskLVGL") wakes core 1 every millisecond even with
+   `lvgl_port_stop()` and its tick timer stopped. On a dual-core ESP32-S3 that
+   prevents automatic light sleep. The task is now suspended whenever the face
+   is off and resumed before LVGL is resumed on wake. The touch GPIO wake is
+   independent of that task and still wakes the app.
+
+**Fix lives in.**
+[`components/mosu_net/src/mosu_net.c`](../components/mosu_net/src/mosu_net.c),
+[`main/app_main.c`](../main/app_main.c).
+
+**Verification.** In a two-minute unplugged run after the LVGL change,
+`sleep_entries` rose from 0 to 1203 (roughly 10 sleeps/s, matching the 100 ms
+IMU poll) and the cell stayed at 99% with the voltage flat. Ten off/on cycles
+and a screenshot confirmed the face still wakes and draws correctly.
 
 ## Adding a finding
 

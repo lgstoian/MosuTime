@@ -161,6 +161,10 @@ Bluetooth is compiled out (`CONFIG_BT_ENABLED=n`, asserted in
   and increase the interval or disable `wifi_always_on`-style retries if it
   is too high.
 
+The definitive measurement is the SD log (`/sdcard/power.log`, one row per
+minute) plus the `sleep_entries` column: if it climbs at roughly the IMU poll
+rate while the face is off, light sleep is working. See `docs/audit.md`.
+
 ## Quiet by default
 
 Production is silent unless something fails:
