@@ -54,6 +54,7 @@ static mosu_config_t s_cfg;
 static bool s_have_ui;
 static bool s_display_ok;
 static bool s_lvgl_stopped;
+static TaskHandle_t s_lvgl_task;
 
 /* Power accounting for the `stats` console command.  Screen-on seconds and
  * wake count are the two numbers that explain a short battery life.  They
@@ -343,6 +344,9 @@ static void screen_on(bool via_touch)
         update_time();
         update_battery(true);
         update_wifi_icon();
+        if (s_lvgl_task) {
+            vTaskResume(s_lvgl_task);
+        }
         if (s_lvgl_stopped) {
             lvgl_port_resume();
             s_lvgl_stopped = false;
@@ -374,6 +378,11 @@ static void screen_off(void)
     if (s_have_ui) {
         lvgl_port_stop();
         s_lvgl_stopped = true;
+        /* The LVGL task otherwise wakes core 1 every millisecond even with
+         * its timers stopped, which prevents dual-core light sleep. */
+        if (s_lvgl_task) {
+            vTaskSuspend(s_lvgl_task);
+        }
         /* Let an in-flight QSPI flush finish before the panel is switched
          * off and put to sleep.  A full frame is ~411 KB, so 80 ms is the
          * safe side of the transfer time. */
@@ -773,6 +782,7 @@ void app_main(void)
         if (err == ESP_OK) {
             s_have_ui = true;
             mosu_ui_set_touch_cb(on_touch, NULL);
+            s_lvgl_task = xTaskGetHandle("taskLVGL");
         } else {
             ESP_LOGE(TAG, "UI init failed: %s", esp_err_to_name(err));
         }
