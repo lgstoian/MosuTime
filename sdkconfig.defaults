@@ -84,3 +84,6 @@ CONFIG_LOG_MAXIMUM_LEVEL_VERBOSE=y
 
 # Light-sleep telemetry: count actual sleep entries for the power log.
 CONFIG_PM_LIGHT_SLEEP_CALLBACKS=y
+
+# Per-task CPU time for the light-sleep investigation.
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y

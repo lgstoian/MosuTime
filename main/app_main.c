@@ -151,6 +151,7 @@ static void power_log_store(void)
  * non-volatile, so a full discharge from 100% to empty leaves the whole curve
  * behind even when RTC memory is lost. */
 static bool s_lock_dumped;
+static bool s_task_dumped;
 
 static void power_log_sd(void)
 {
@@ -179,6 +180,18 @@ static void power_log_sd(void)
         if (locks) {
             esp_pm_dump_locks(locks);
             fclose(locks);
+        }
+    }
+
+    if (!s_task_dumped && !pmu.charging) {
+        s_task_dumped = true;
+        static char stats_buf[4096];
+        memset(stats_buf, 0, sizeof(stats_buf));
+        vTaskGetRunTimeStats(stats_buf);
+        FILE *tasks = fopen("/sdcard/taskstats.txt", "w");
+        if (tasks) {
+            fputs(stats_buf, tasks);
+            fclose(tasks);
         }
     }
 }
