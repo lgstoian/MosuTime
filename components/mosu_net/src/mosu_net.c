@@ -45,6 +45,8 @@ static EventGroupHandle_t s_events;
 static TaskHandle_t s_task;
 static volatile bool s_sync_requested;
 static volatile bool s_wifi_started;
+static bool s_wifi_inited;
+static wifi_init_config_t s_wifi_init_cfg;
 static volatile mosu_net_state_t s_state = MOSU_NET_IDLE;
 static volatile int8_t s_rssi;
 static char s_ip[16];
@@ -119,6 +121,17 @@ static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id,
 
 static bool wifi_ensure_started(void)
 {
+    if (!s_wifi_inited) {
+        /* esp_wifi_init() registers a skip-light-sleep callback that is only
+         * removed by esp_wifi_deinit().  We deinit after every sync, so the
+         * driver must be initialised again here. */
+        esp_err_t err = esp_wifi_init(&s_wifi_init_cfg);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "wifi re-init: %s", esp_err_to_name(err));
+            return false;
+        }
+        s_wifi_inited = true;
+    }
     if (s_wifi_started) {
         return true;
     }
@@ -335,6 +348,14 @@ static void radio_off_if_possible(void)
     esp_wifi_disconnect();
     esp_wifi_stop();
     s_wifi_started = false;
+    if (s_wifi_inited) {
+        /* Critical for battery life: esp_wifi_init() registers a
+         * skip-light-sleep callback (esp_wifi_internal_is_tsf_active) that
+         * survives esp_wifi_stop() and blocks automatic light sleep forever.
+         * Only esp_wifi_deinit() removes it. */
+        esp_wifi_deinit();
+        s_wifi_inited = false;
+    }
 }
 
 uint32_t mosu_net_wifi_on_ms(void)
@@ -631,7 +652,9 @@ esp_err_t mosu_net_start(const mosu_config_t *cfg)
     }
 
     wifi_init_config_t init_cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_RETURN_ON_ERROR(esp_wifi_init(&init_cfg), TAG, "wifi init");
+    memcpy(&s_wifi_init_cfg, &init_cfg, sizeof(init_cfg));
+    ESP_RETURN_ON_ERROR(esp_wifi_init(&s_wifi_init_cfg), TAG, "wifi init");
+    s_wifi_inited = true;
     ESP_RETURN_ON_ERROR(
         esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
                                             wifi_event_handler, NULL, NULL),
