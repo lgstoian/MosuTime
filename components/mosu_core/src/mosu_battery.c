@@ -13,9 +13,12 @@ typedef struct {
     uint8_t percent;
 } curve_point_t;
 
-/* Descending voltage, descending percentage. */
+/* Descending voltage, descending percentage.  The AXP2101 terminates at
+ * 25 mA, so a full cell rests around 4.15-4.18 V, not 4.20 V.  Mapping 100%
+ * to 4.20 V made the watch report 98% forever even when the charger had
+ * finished; 4.16 V is the real full point for this profile. */
 static const curve_point_t s_curve[] = {
-    {4200, 100}, {4120, 95}, {4050, 88}, {3980, 80}, {3910, 70},
+    {4160, 100}, {4120, 95}, {4050, 88}, {3980, 80}, {3910, 70},
     {3850, 60},  {3790, 48}, {3730, 36}, {3680, 26}, {3620, 16},
     {3550, 9},   {3450, 4},  {3300, 0},
 };
