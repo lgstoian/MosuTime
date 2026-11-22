@@ -54,6 +54,8 @@ static mosu_config_t s_cfg;
 static bool s_have_ui;
 static bool s_display_ok;
 static bool s_lvgl_stopped;
+static esp_pm_lock_handle_t s_usb_awake_lock;
+static bool s_usb_lock_held;
 
 /* Power accounting for the `stats` console command.  Screen-on seconds and
  * wake count are the two numbers that explain a short battery life.  They
@@ -152,6 +154,24 @@ static void power_log_store(void)
  * behind even when RTC memory is lost. */
 static bool s_lock_dumped;
 static bool s_task_dumped;
+
+/* USB Serial/JTAG cannot reliably wake the chip from light sleep on this
+ * board.  Hold a NO_LIGHT_SLEEP lock while the cable is attached so the
+ * console always works; release it on battery so the power saving applies. */
+static void update_usb_awake(void)
+{
+    mosu_board_pmu_t pmu;
+    if (mosu_board_pmu_read(&pmu) != ESP_OK) {
+        return;
+    }
+    if (pmu.vbus_present && !s_usb_lock_held && s_usb_awake_lock) {
+        esp_pm_lock_acquire(s_usb_awake_lock);
+        s_usb_lock_held = true;
+    } else if (!pmu.vbus_present && s_usb_lock_held && s_usb_awake_lock) {
+        esp_pm_lock_release(s_usb_awake_lock);
+        s_usb_lock_held = false;
+    }
+}
 
 static void power_log_sd(void)
 {
@@ -761,6 +781,8 @@ void app_main(void)
         /* The power manager applies the configured brightness and the
          * CPU/light-sleep policy before anything is drawn. */
         mosu_power_init(&s_cfg);
+        esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "mosu_usb",
+                           &s_usb_awake_lock);
         esp_pm_sleep_cbs_register_config_t cbs = {
             .enter_cb = sleep_enter_cb,
             .exit_cb = NULL,
@@ -814,6 +836,7 @@ void app_main(void)
     uint32_t clock_poll = 0;
     uint32_t pwrlog_poll = now_ms();
     uint32_t sdlog_poll = now_ms();
+    uint32_t usb_poll = 0;
 
     power_log_sd();
 
@@ -835,6 +858,10 @@ void app_main(void)
         }
         uint32_t now = now_ms();
 
+        if (usb_poll == 0 || (uint32_t)(now - usb_poll) >= 5000u) {
+            update_usb_awake();
+            usb_poll = now;
+        }
         if ((uint32_t)(now - pwrlog_poll) >= 300000u) {
             power_log_store();
             pwrlog_poll = now;
