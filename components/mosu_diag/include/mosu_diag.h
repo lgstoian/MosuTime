@@ -14,6 +14,12 @@ extern "C" {
 #endif
 
 typedef struct {
+    uint32_t epoch;
+    uint16_t mv;
+    uint8_t pct;
+} mosu_power_log_t;
+
+typedef struct {
     uint32_t uptime_s;
     uint32_t screen_on_s;
     uint32_t wakes;
@@ -50,6 +56,8 @@ typedef struct {
     void (*stats_reset)(void);
     /* Audit switches and status: receives the arguments after "audit". */
     void (*audit)(const char *args);
+    /* Last battery record written to flash; survives a dead cell. */
+    bool (*power_log)(mosu_power_log_t *out);
 } mosu_diag_hooks_t;
 
 /*

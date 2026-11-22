@@ -427,6 +427,7 @@ bool mosu_board_rtc_valid(void)
 #define FT_REG_PERIOD_MONITOR 0x89
 #define FT_REG_ENTER_MONITOR 0x87
 
+
 static i2c_master_dev_handle_t s_touch;
 
 esp_err_t mosu_board_touch_tune(uint8_t monitor_ms, uint8_t enter_monitor_s)

@@ -84,6 +84,50 @@ static mosu_power_learn_t s_power_learn;
 static uint32_t s_power_last_ms;
 static uint32_t s_power_window_start;
 
+/* A record in flash survives a dead cell, unlike RTC_NOINIT.  Written every
+ * five minutes so an overnight run still tells us the drain rate. */
+typedef struct {
+    uint32_t epoch;
+    uint16_t mv;
+    uint8_t pct;
+} mosu_pwrlog_t;
+
+static mosu_pwrlog_t s_last_log;
+
+static void power_log_restore(void)
+{
+    nvs_handle_t handle;
+    if (nvs_open("mosu", NVS_READONLY, &handle) != ESP_OK) {
+        return;
+    }
+    size_t len = sizeof(s_last_log);
+    nvs_get_blob(handle, "pwrlog", &s_last_log, &len);
+    nvs_close(handle);
+}
+
+static void power_log_store(void)
+{
+    mosu_board_pmu_t pmu;
+    if (mosu_board_pmu_read(&pmu) != ESP_OK || !pmu.battery_present ||
+        pmu.charging) {
+        return;
+    }
+    time_t now = time(NULL);
+    if (now < 1600000000) {
+        return;
+    }
+    s_last_log.epoch = (uint32_t)now;
+    s_last_log.mv = pmu.millivolts;
+    s_last_log.pct = pmu.percent;
+    nvs_handle_t handle;
+    if (nvs_open("mosu", NVS_READWRITE, &handle) != ESP_OK) {
+        return;
+    }
+    nvs_set_blob(handle, "pwrlog", &s_last_log, sizeof(s_last_log));
+    nvs_commit(handle);
+    nvs_close(handle);
+}
+
 static void stats_init(void)
 {
     if (s_stats_magic == MOSU_STATS_MAGIC) {
@@ -506,6 +550,19 @@ static void diag_stats_reset(void)
     s_screen_on_since_ms = now_ms();
 }
 
+static bool diag_power_log(mosu_power_log_t *out)
+{
+    if (!out || !s_last_log.epoch) {
+        return false;
+    }
+    *out = (mosu_power_log_t){
+        .epoch = s_last_log.epoch,
+        .mv = s_last_log.mv,
+        .pct = s_last_log.pct,
+    };
+    return true;
+}
+
 static void diag_audit(const char *args)
 {
     char name[16] = {0};
@@ -555,6 +612,7 @@ static const mosu_diag_hooks_t s_diag_hooks = {
     .stats = diag_stats,
     .stats_reset = diag_stats_reset,
     .audit = diag_audit,
+    .power_log = diag_power_log,
 };
 
 static void handle_diag_requests(void)
@@ -592,6 +650,7 @@ void app_main(void)
 {
     stats_init();
     init_nvs();
+    power_log_restore();
 
     esp_log_level_set("*", ESP_LOG_ERROR);
     esp_log_level_set("mosu", ESP_LOG_ERROR);
@@ -684,6 +743,7 @@ void app_main(void)
     uint32_t battery_poll = now_ms();
     uint32_t wifi_poll = 0;
     uint32_t clock_poll = 0;
+    uint32_t pwrlog_poll = now_ms();
 
     mosu_power_learn_init(&s_power_learn);
     s_power_last_ms = now_ms();
@@ -702,6 +762,11 @@ void app_main(void)
             }
         }
         uint32_t now = now_ms();
+
+        if ((uint32_t)(now - pwrlog_poll) >= 300000u) {
+            power_log_store();
+            pwrlog_poll = now;
+        }
 
         uint32_t dt = now - s_power_last_ms;
         s_power_last_ms = now;

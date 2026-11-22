@@ -498,6 +498,14 @@ static void handle_line(char *line)
                (unsigned)stats.last_raise_deg, (int)stats.last_nz_milli);
         printf("on    : radio %u s, audio %u s since boot\n",
                (unsigned)stats.wifi_on_s, (unsigned)stats.audio_on_s);
+        if (s_hooks.power_log) {
+            mosu_power_log_t log;
+            if (s_hooks.power_log(&log) && log.epoch) {
+                printf("log   : last %u%% at epoch %u (%u mV)\n",
+                       (unsigned)log.pct, (unsigned)log.epoch,
+                       (unsigned)log.mv);
+            }
+        }
         if (!stats.charging && stats.battery_present && stats.uptime_s > 600 &&
             stats.boot_pct > stats.battery_pct) {
             const unsigned used = stats.boot_pct - stats.battery_pct;
