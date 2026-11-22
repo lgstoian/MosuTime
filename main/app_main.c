@@ -152,6 +152,8 @@ static void power_log_store(void)
 /* Append one sample per minute to /sdcard/power.log.  The card is
  * non-volatile, so a full discharge from 100% to empty leaves the whole curve
  * behind even when RTC memory is lost. */
+static bool s_lock_dumped;
+
 static void power_log_sd(void)
 {
     if (!mosu_board_sdcard_ready()) {
@@ -172,6 +174,15 @@ static void power_log_sd(void)
             (unsigned)s_wake_count, (unsigned)s_boot_count,
             (unsigned)s_sleep_entries);
     fclose(file);
+
+    if (!s_lock_dumped && !pmu.charging) {
+        s_lock_dumped = true;
+        FILE *locks = fopen("/sdcard/pmlocks.txt", "w");
+        if (locks) {
+            esp_pm_dump_locks(locks);
+            fclose(locks);
+        }
+    }
 }
 
 static void stats_init(void)
