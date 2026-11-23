@@ -203,6 +203,8 @@ def main():
                         help="replace the template Wi-Fi password")
     parser.add_argument("--no-voice", action="store_true",
                         help="upload only mosu.cfg")
+    parser.add_argument("--voice-only", action="store_true",
+                        help="upload only the WAV clips, leaving mosu.cfg alone")
     parser.add_argument("--stats", action="store_true",
                         help="enable the power counters in the pushed config")
     args = parser.parse_args()
@@ -225,12 +227,13 @@ def main():
         time.sleep(0.3)
 
         ok = True
-        cfg = config_payload(args.ssid, args.password, args.stats)
-        if push_file(console, REMOTE_CFG, cfg, "mosu.cfg"):
-            print("PUSH ok   %s (%d bytes)" % (REMOTE_CFG, len(cfg)),
-                  flush=True)
-        else:
-            ok = False
+        if not args.voice_only:
+            cfg = config_payload(args.ssid, args.password, args.stats)
+            if push_file(console, REMOTE_CFG, cfg, "mosu.cfg"):
+                print("PUSH ok   %s (%d bytes)" % (REMOTE_CFG, len(cfg)),
+                      flush=True)
+            else:
+                ok = False
 
         if ok and not args.no_voice and os.path.isdir(VOICE):
             names = sorted(n for n in os.listdir(VOICE) if n.endswith(".wav"))

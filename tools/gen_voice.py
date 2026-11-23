@@ -32,6 +32,10 @@ Usage
 
     # Replace clips that already exist:
     python tools/gen_voice.py --out sd_card/voice --force
+
+The weekday clips use their own length scale (1.30 by default) because the
+short day names sounded rushed at the hour/minute rate of 1.08. Use
+--day-length-scale to change just those seven files, with --only-days.
 """
 
 from __future__ import annotations
@@ -55,6 +59,7 @@ VOICE_CONFIG_URL = VOICE_URL + ".json"
 VOICE_NAME = "ro_RO-mihai-medium"
 
 DEFAULT_LENGTH_SCALE = 1.08
+DEFAULT_DAY_LENGTH_SCALE = 1.30  # the short weekday words need a slower rate
 DEFAULT_CLIP_GAP_MS = 60  # mirrors clip_gap_ms in sd_card/mosu.cfg
 
 FULL_SCALE = 32767.0
@@ -450,6 +455,13 @@ def main() -> int:
     parser.add_argument("--clip-gap-ms", type=int, default=DEFAULT_CLIP_GAP_MS,
                         help="silence between preview clips, in ms "
                              f"(default: {DEFAULT_CLIP_GAP_MS})")
+    parser.add_argument("--day-length-scale", type=float,
+                        default=DEFAULT_DAY_LENGTH_SCALE,
+                        help="slower rate for the weekday clips only; "
+                             "higher is slower "
+                             f"(default: {DEFAULT_DAY_LENGTH_SCALE})")
+    parser.add_argument("--only-days", action="store_true",
+                        help="regenerate only the d_0..d_6 weekday clips")
     parser.add_argument("--preview", action="store_true",
                         help="also write <out>/preview.wav with a few "
                              "complete announcements")
@@ -463,6 +475,9 @@ def main() -> int:
     if args.length_scale <= 0:
         print("--length-scale must be greater than zero", file=sys.stderr)
         return 2
+    if args.day_length_scale is not None and args.day_length_scale <= 0:
+        print("--day-length-scale must be greater than zero", file=sys.stderr)
+        return 2
     if args.clip_gap_ms < 0:
         print("--clip-gap-ms must not be negative", file=sys.stderr)
         return 2
@@ -470,6 +485,8 @@ def main() -> int:
     out = Path(args.out)
     models = Path(args.models)
     plan = clip_plan()
+    if args.only_days:
+        plan = [(name, text) for name, text in plan if name.startswith("d_")]
 
     # Fail before rendering anything if a phrase is not covered by the lexicon
     # or needs a symbol this voice does not have.
@@ -511,7 +528,9 @@ def main() -> int:
         destination = out / name
         if destination.exists() and not args.force:
             continue
-        audio = voice.synthesise(phonemes[name], args.length_scale)
+        scale = (args.day_length_scale
+                 if name.startswith("d_") else args.length_scale)
+        audio = voice.synthesise(phonemes[name], scale)
         samples = array.array("h")
         samples.extend(int(round(sample * FULL_SCALE)) for sample in audio)
         write_mono(destination, voice.sample_rate, samples)
