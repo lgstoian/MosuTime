@@ -53,9 +53,9 @@ CONFIG_PATH = REPO_ROOT / "sd_card" / "mosu.cfg"
 # mosu_config_defaults() in components/mosu_config/src/mosu_config.c.
 CONFIG_DEFAULTS = {
     "brightness": 55.0,
-    "screen_on_ms": 15000.0,
+    "screen_on_ms": 11250.0,
     "motion_poll_hz": 8.0,
-    "sync_hours": 6.0,
+    "sync_hours": 12.0,
 }
 
 # The firmware clamps these in mosu_config_sanitize(); mirror the limits so a

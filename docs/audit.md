@@ -17,7 +17,7 @@ find it by subtraction.
 | --- | --- |
 | `audit` | Print the switch states and radio/audio on-times since boot. |
 | `audit wifi off` | Stop and disarm all syncs and presence scans, park the radio. |
-| `audit imu off` | Stop the 10 Hz accelerometer poll; wrist raise will not wake the face. |
+| `audit imu off` | Stop the 8 Hz accelerometer poll; wrist raise will not wake the face. |
 | `audit touch off` | Ignore touch wake and disarm the touch GPIO wake source. |
 | `audit audio off` | Refuse announcements and park the codec. |
 | `audit panel off` | Disable panel sleep-in (`0x10`) while the face is off. |
@@ -87,7 +87,7 @@ is obvious in one run. A 1% drop in an hour is about 4 mA.
 | --- | --- | --- |
 | 0 | none | Baseline: is the drain real and how large? |
 | 1 | wifi | Is the radio stuck on or syncing too often? |
-| 2 | imu | Is the 10 Hz poll keeping the CPU awake? |
+| 2 | imu | Is the 8 Hz poll keeping the CPU awake? |
 | 3 | touch | Is the FT3168 the floor? |
 | 4 | audio | Is the codec/PA leaking current after a phrase? |
 | 5 | panel | Does sleep-in actually reduce panel current? |

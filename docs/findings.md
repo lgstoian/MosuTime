@@ -320,7 +320,7 @@ emulator-only; the production build and `sdkconfig.defaults` are unaffected.
 
 **Symptom.** A router reboot, a DHCP hiccup or an association failure at the
 wrong moment could leave the displayed time uncorrected until the next
-`sync_hours` window - up to six hours by default.
+`sync_hours` window - up to twelve hours by default.
 
 **Cause.** The failure path scheduled the next attempt with the same interval
 as a success. A transient failure and a permanently wrong password were treated

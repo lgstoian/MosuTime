@@ -162,7 +162,7 @@ screen_on_ms = 11250
 [clock]
 auto_timezone = true
 timezone = Europe/Bucharest
-sync_hours = 6           # interval in hours, 1..168
+sync_hours = 12          # interval in hours, 1..168
 sync_per_day = 0         # 1..24 overrides sync_hours; 0 = use sync_hours
 
 [announce]

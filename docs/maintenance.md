@@ -61,7 +61,7 @@ Practical rules, all enforced by `components/mosu_config`:
 | `clock.timezone` | IANA or POSIX | `Europe/Bucharest` | Used when `auto_timezone` is false or the lookup fails. |
 | `clock.auto_timezone` | bool | true | Ask the network for the zone by IP. An unknown name falls back to the returned UTC offset. |
 | `clock.geo_url` | URL | `http://ip-api.com/line/?fields=timezone,offset` | Timezone service. Plain HTTP is cheaper; an explicit `https://` URL is still supported. |
-| `clock.sync_hours` | 1…168 | 6 | Hours between successful syncs. The first three failures retry after 5, 15 and 30 minutes. |
+| `clock.sync_hours` | 1…168 | 12 | Hours between successful syncs. The first three failures retry after 5, 15 and 30 minutes. |
 | `clock.sync_per_day` | 0…24 | 0 | When 1…24, overrides `sync_hours` and syncs that many times a day (5 = every 4.8 h). 0 means "use `sync_hours`". |
 | `clock.wifi_always_on` | bool | false | `true` keeps the radio on and costs much more. Leave it false. |
 | `clock.manual_time` | `"YYYY-MM-DD HH:MM"` | empty | Fallback only when there is no valid RTC and no network. |

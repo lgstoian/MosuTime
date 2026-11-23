@@ -43,24 +43,23 @@ again, so heavy use is overestimated rather than understated. The model also
 assumes every raise passes the angle and refractory filters; change `--raises`
 to the number that actually reaches the screen if you have measured it.
 
-With the shipped defaults (400 mAh, brightness 55, 11.25 s screen-on, 10 Hz
-IMU, 6 h sync, 20 touch/boot wakes and 60 wrist raises per day, 8
-announcements) the model gives:
+With the shipped defaults (400 mAh, brightness 55, 11.25 s screen-on, 8 Hz
+IMU, 12 h sync, 20 touch/boot wakes and 60 wrist raises per day, 8
+announcements) the first-order model gives:
 
 | Term | Average | Share |
 | --- | --- | --- |
-| Light sleep + touch controller idle | 2.10 mA | 66% |
-| IMU polling at 10 Hz | 0.60 mA | 19% |
+| Light sleep + touch controller idle | 2.10 mA | 69% |
+| IMU polling at 8 Hz | 0.48 mA | 16% |
 | Screen-on windows (11.25 s) | 0.37 mA | 12% |
 | Speaking | 0.07 mA | 2% |
-| Wi-Fi sync | 0.04 mA | 1% |
-| **Total** | **3.18 mA** | **100%** |
+| Wi-Fi sync | 0.02 mA | <1% |
+| **Total** | **3.04 mA** | **100%** |
 
-That is about **5.2 days from the fitted 400 mAh cell** (3.9 days from
-300 mAh and 6.6 days from 500 mAh), by the model only. The 2.1 mA floor comes
-from two assumptions: 0.6 mA in light sleep and 1.5 mA for the touch
-controller. If the measured floor is higher, the runtime drops proportionally;
-the touch controller is the first thing to measure.
+That is about **5.5 days** by the model only. The measured discharge on the
+final firmware was 99% → 0% in **25.9 h (15.3 mA average)** — the model's
+2.1 mA idle floor is far too optimistic for this board, so use the measured
+number, not this table, for runtime planning.
 
 ## What owners of this board measured
 

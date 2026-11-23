@@ -23,8 +23,8 @@ so the detector cannot get stuck measuring from an arm position that was left
 behind. A slow raise is protected from being absorbed into the baseline, and a
 raise that starts while the arm is already swinging (walking) is accepted.
 
-The IMU is sampled at 10 Hz, up from 8, matching the QMI8658's 21 Hz low-power
-output rate without doubling the polling cost.
+The IMU was sampled at 10 Hz in this release; the default has since been
+lowered back to 8 Hz for a small power saving, with the same raise detector.
 
 ## New ways to see the gesture
 
