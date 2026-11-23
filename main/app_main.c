@@ -123,6 +123,9 @@ static void power_log_restore(void)
 
 static void power_log_store(void)
 {
+    if (!s_cfg.device.diagnostics) {
+        return;
+    }
     mosu_board_pmu_t pmu;
     if (mosu_board_pmu_read(&pmu) != ESP_OK || !pmu.battery_present ||
         pmu.charging) {
@@ -175,7 +178,7 @@ static void update_usb_awake(void)
 
 static void power_log_sd(void)
 {
-    if (!mosu_board_sdcard_ready()) {
+    if (!s_cfg.device.diagnostics || !mosu_board_sdcard_ready()) {
         return;
     }
     mosu_board_pmu_t pmu;
@@ -602,7 +605,9 @@ static void diag_stats(mosu_diag_stats_t *out)
     out->raise_candidates = s_raise_candidates;
     out->wifi_on_s = mosu_net_wifi_on_ms() / 1000u;
     out->audio_on_s = mosu_audio_on_ms() / 1000u;
-    ESP_LOGI(TAG, "sleep entries: %u", (unsigned)s_sleep_entries);
+    if (s_cfg.device.diagnostics) {
+        ESP_LOGI(TAG, "sleep entries: %u", (unsigned)s_sleep_entries);
+    }
     out->last_raise_deg = s_last_raise_deg;
     out->last_nz_milli = s_last_raise_nz_milli;
     out->angle_deg = (uint8_t)mosu_power_learn_angle(
@@ -783,13 +788,15 @@ void app_main(void)
         mosu_power_init(&s_cfg);
         esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "mosu_usb",
                            &s_usb_awake_lock);
-        esp_pm_sleep_cbs_register_config_t cbs = {
-            .enter_cb = sleep_enter_cb,
-            .exit_cb = NULL,
-        };
-        esp_err_t cb_err = esp_pm_light_sleep_register_cbs(&cbs);
-        if (cb_err != ESP_OK) {
-            ESP_LOGW(TAG, "sleep callback: %s", esp_err_to_name(cb_err));
+        if (s_cfg.device.diagnostics) {
+            esp_pm_sleep_cbs_register_config_t cbs = {
+                .enter_cb = sleep_enter_cb,
+                .exit_cb = NULL,
+            };
+            esp_err_t cb_err = esp_pm_light_sleep_register_cbs(&cbs);
+            if (cb_err != ESP_OK) {
+                ESP_LOGW(TAG, "sleep callback: %s", esp_err_to_name(cb_err));
+            }
         }
         err = mosu_ui_create(&s_cfg);
         if (err == ESP_OK) {

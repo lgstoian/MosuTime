@@ -32,6 +32,7 @@ typedef struct {
     char name[MOSU_CFG_NAME_MAX];
     uint8_t log_level; /* 0 none .. 5 verbose */
     bool stats;        /* background power accounting and `stats` */
+    bool diagnostics;  /* SD/NVS power logs and PM/task dumps */
 } mosu_device_cfg_t;
 
 typedef struct {

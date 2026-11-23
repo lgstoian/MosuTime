@@ -192,6 +192,7 @@ void mosu_config_defaults(mosu_config_t *cfg)
      * Raise this to info/debug in mosu.cfg when a problem needs looking at. */
     cfg->device.log_level = 1; /* error */
     cfg->device.stats = false;
+    cfg->device.diagnostics = false;
 
     cfg->display.brightness = 55;
     cfg->display.screen_on_ms = 11250;
@@ -228,7 +229,7 @@ void mosu_config_defaults(mosu_config_t *cfg)
              "http://ip-api.com/line/?fields=timezone,offset");
     copy_str(cfg->clock.ntp1, sizeof(cfg->clock.ntp1), "pool.ntp.org");
     copy_str(cfg->clock.ntp2, sizeof(cfg->clock.ntp2), "time.google.com");
-    cfg->clock.sync_hours = 6;
+    cfg->clock.sync_hours = 12;
     cfg->clock.sync_per_day = 0; /* 0 = use sync_hours */
     cfg->clock.wifi_always_on = false;
     cfg->clock.manual_time[0] = '\0';
@@ -365,6 +366,12 @@ static void apply_key(mosu_config_t *cfg, section_t section, const char *key,
                 return;
             }
             cfg->device.stats = bval;
+        } else if (!strcasecmp(key, "diagnostics")) {
+            if (!parse_bool(value, &bval)) {
+                report_error(report, "invalid boolean for %s", key);
+                return;
+            }
+            cfg->device.diagnostics = bval;
         } else {
             report_warn(report, "unknown key: %s", key);
             return;

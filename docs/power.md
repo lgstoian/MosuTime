@@ -181,6 +181,12 @@ Production is silent unless something fails:
 * `stats = false`: the power counters and the `stats` command are off. They
   are RAM-only and cost nothing measurable, but the switch removes even that.
   Enable them for a drain test (`push_sd.py --stats`, or `stats = true`).
+* `diagnostics = false`: no per-minute `/sdcard/power.log`, no 5-minute NVS
+  battery record, no PM lock/task dumps and no light-sleep counter. Set it to
+  `true` when measuring; the code stays in the firmware either way.
+* Sync interval is 12 h. Each sync costs roughly 0.5 mAh, so 2/day instead of
+  4/day saves a little and matches the wearer's "not several times a day"
+  requirement; the trade-off is more RTC drift between corrections.
 * The console blocks on the USB driver instead of polling every 200 ms, and
   the network task sleeps until the next scheduled sync or presence scan.
 * `screen_on_ms = 11250` (25% below the old 15 s; the hourly learner can

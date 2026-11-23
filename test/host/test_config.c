@@ -69,7 +69,7 @@ static void test_shipped_config(void)
     EXPECT(cfg.display.brightness == 55);
     EXPECT(cfg.display.screen_on_ms == 11250);
     EXPECT_STR(cfg.clock.timezone, "Europe/Bucharest");
-    EXPECT(cfg.clock.sync_hours == 6);
+    EXPECT(cfg.clock.sync_hours == 12);
     EXPECT(cfg.clock.sync_per_day == 0);
     EXPECT(cfg.wifi_count == 1);
     EXPECT_STR(cfg.wifi[0].ssid, "Acasa");
@@ -240,7 +240,7 @@ static void test_sync_per_day(void)
     EXPECT(rc == 0);
     EXPECT(report.errors == 0);
     EXPECT(cfg.clock.sync_per_day == 5);
-    EXPECT(cfg.clock.sync_hours == 6);
+    EXPECT(cfg.clock.sync_hours == 12);
 
     static const char clamped[] = "[clock]\nsync_per_day = 99\n";
     mosu_config_defaults(&cfg);

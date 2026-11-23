@@ -251,6 +251,8 @@ SCHEMA = [
           hint="Console and USB log detail; error is the quiet default"),
     Field("device", "stats", "Power stats", "bool", False,
           hint="Count screen time and wakes (needed for a drain test)"),
+    Field("device", "diagnostics", "Power logs", "bool", False,
+          hint="Write power.log and PM/task dumps to the SD card"),
 
     Field("display", "brightness", "Brightness", "int", 55, 1, 100,
           hint="1..100, the same at every wake"),
@@ -305,7 +307,7 @@ SCHEMA = [
           hint="Plain text, two lines or JSON with timezone/offset"),
     Field("clock", "ntp1", "NTP server 1", "text", "pool.ntp.org"),
     Field("clock", "ntp2", "NTP server 2", "text", "time.google.com"),
-    Field("clock", "sync_hours", "Sync interval", "int", 6, 1, 168,
+    Field("clock", "sync_hours", "Sync interval", "int", 12, 1, 168,
           hint="Hours between syncs when sync_per_day is 0"),
     Field("clock", "sync_per_day", "Syncs per day", "int", 0, 0, 24,
           hint="Overrides the interval: 4 = every 6 h, 24 = hourly, 0 = off"),

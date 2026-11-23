@@ -31,7 +31,9 @@ from the console task deadlocked the board in an earlier build.)
 
 ## Full discharge to the SD card
 
-The firmware now appends one line per minute to `/sdcard/power.log`:
+The firmware appends one line per minute to `/sdcard/power.log` **when
+`device.diagnostics = true` in `mosu.cfg`** (it is off by default in
+production):
 
 ```
 epoch,pct,mV,charging,screen,wakes,boots,sleep_entries
