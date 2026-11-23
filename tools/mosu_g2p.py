@@ -20,8 +20,9 @@ Conventions, all taken from the voice's training distribution:
 * `ˈ` marks the stressed syllable, `ˌ` a secondary stress.  The model is
   sensitive to them: dropping `ˈ` changes the word.
 * Final `-i` after a consonant is the non-syllabic `ʲ` (`cinci` -> `tʃintʃʲ`).
-  `Luni` and `Marți` carry a doubled `ʲʲ`; that is what this voice was trained
-  on and it is kept verbatim rather than "corrected".
+* The weekday names use a single `ʲ`, as in Romanian dictionaries
+  (`luni` /ˈlunʲ/, `marți` /marʦʲ/). An earlier version doubled it, which
+  lengthened the palatal and made the day names sound foreign.
 * The diphthongs are spelled the way the voice expects, which is not textbook
   IPA: `trei` -> `tɾeɪ`, `șaisprezece` -> `ʃaɪspɾezetʃe`, `douăzeci` ->
   `doʊəzetʃʲ`.  Rewriting them as `ej`/`aj`/`owə` makes the model babble.
@@ -78,13 +79,13 @@ LEXICON = {
     "patruzeci": "pˌatɾuzˈetʃʲ",
     "cincizeci": "tʃˌintʃizˈetʃʲ",
     # Weekdays: "Luni."
-    "luni": "lˈunʲʲ",
-    "marți": "mˈartsʲʲ",
-    "miercuri": "mjerkˈurʲ",
+    "luni": "lˈunʲ",
+    "marți": "mˈartsʲ",
+    "miercuri": "ˈmjeɾkurʲ",
     "joi": "ʒˈoj",
-    "vineri": "vˈineɾʲˌʲ",
+    "vineri": "vˈineɾʲ",
     "sâmbătă": "sˈɨmbətə",
-    "duminică": "dˌuminˈikə",
+    "duminică": "duˈminikə",
 }
 
 # Every symbol this module can emit.  gen_voice.py checks these against the
@@ -162,7 +163,7 @@ def selftest() -> int:
     expect("și două minute.", "ʃi dˈouˌə minˈute.")
     expect("și treizeci de minute.", "ʃi tɾˌeizˈetʃʲ de minˈute.")
     # Punctuation keeps its place, stress marks survive.
-    expect("Luni.", "lˈunʲʲ.")
+    expect("Luni.", "lˈunʲ.")
     expect("Este ora unu", "jˌeste ˈoɾa ˈunu")
     expect("Este ora douăsprezece", "jˌeste ˈoɾa dˈouˌəspɾezˌetʃe")
 
