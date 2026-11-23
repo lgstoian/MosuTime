@@ -161,9 +161,15 @@ Bluetooth is compiled out (`CONFIG_BT_ENABLED=n`, asserted in
   and increase the interval or disable `wifi_always_on`-style retries if it
   is too high.
 
-The definitive measurement is the SD log (`/sdcard/power.log`, one row per
-minute) plus the `sleep_entries` column: if it climbs at roughly the IMU poll
-rate while the face is off, light sleep is working. See `docs/audit.md`.
+**Measured on the final firmware, 400 mAh cell:** 99% → 0% in **25.9 hours**
+(≈15 mA average) with only 17 wakes in that time and 1.95 million light-sleep
+entries. The first 21 hours used about 2.5%/hour (≈10 mA); the last five hours
+were much steeper (sleep entries stop and the cell sags), which looks like the
+PMU/DFS struggling near empty rather than a normal-load regression. That is a
+five-fold improvement over the original ~5 hours.
+
+`/sdcard/power.log` records every minute of this run and is the source of these
+numbers.
 
 ## Quiet by default
 
