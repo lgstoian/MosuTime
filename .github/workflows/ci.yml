@@ -26,6 +26,11 @@ jobs:
       - name: Check the pronunciation lexicon
         run: python tools/mosu_g2p.py --selftest
 
+      # Prove the power-log gate rejects a stuck counter and a left-on screen;
+      # a gate that only parses rows would be another false green.
+      - name: Check the power log gate
+        run: python tools/check_power_log.py --selftest
+
       - name: Configure and run the host tests
         run: |
           cmake -S test/host -B test/host/build -DCMAKE_BUILD_TYPE=Debug

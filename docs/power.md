@@ -181,8 +181,10 @@ Production is silent unless something fails:
   are RAM-only and cost nothing measurable, but the switch removes even that.
   Enable them for a drain test (`push_sd.py --stats`, or `stats = true`).
 * `diagnostics = false`: no per-minute `/sdcard/power.log`, no 5-minute NVS
-  battery record, no PM lock/task dumps and no light-sleep counter. Set it to
-  `true` when measuring; the code stays in the firmware either way.
+  battery record and no PM lock/task dumps. Set it to `true` when measuring;
+  the code stays in the firmware either way. The light-sleep counter is now
+  kept in RTC no-init memory and counted even with diagnostics off, so
+  `stats` can report it without a discharge log.
 * Sync interval is 12 h. Each sync costs roughly 0.5 mAh, so 2/day instead of
   4/day saves a little and matches the wearer's "not several times a day"
   requirement; the trade-off is more RTC drift between corrections.
@@ -290,6 +292,8 @@ Rules that make the number meaningful:
   opens and holds `NO_LIGHT_SLEEP` while connected;
 * the counters live in RTC no-init memory, so the reset from opening the
   console does not lose the window; the RTC clock supplies the elapsed time;
+  `sleep : N` is kept there too. A `sleep : 0` while the cable is attached is
+  expected — the console holds `NO_LIGHT_SLEEP` — not proof of a regression;
 * the percentage is the AXP2101 voltage gauge, and one percent is 4 mAh on
   this cell. A one-hour window is very coarse; use six hours or a full day;
 * `stats` also prints a `drain:` line once the window is longer than ten

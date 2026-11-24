@@ -34,6 +34,8 @@ typedef struct {
     uint32_t raise_candidates;
     uint32_t wifi_on_s;
     uint32_t audio_on_s;
+    /* Light-sleep entries, kept in RTC no-init memory across console resets. */
+    uint32_t sleep_entries;
     int16_t last_nz_milli;
     uint8_t battery_pct;
     uint8_t boot_pct;

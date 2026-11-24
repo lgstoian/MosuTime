@@ -55,6 +55,19 @@ The card survives a dead cell, so this is the definitive test:
    Each minute's row shows the voltage and how many wakes happened. The slope
    from 100% to 0% is the honest average current for a 400 mAh cell.
 
+5. Copy the log off the watch and **gate it** instead of trusting that rows
+   exist:
+   ```
+   python tools/check_power_log.py path/to/power.log
+   ```
+   It splits the file at recharges and reboots, then fails on a stalled or
+   falling `sleep_entries`, a screen left on for more than a quarter of the
+   samples, a battery that rises inside one discharge run, or a sampling gap.
+   A zero in `sleep_entries` used to mean "the console was opened": the counter
+   is now kept in RTC no-init memory, so a zero means the chip really did not
+   sleep. `stats` prints the same counter as `sleep : ... entries` even while
+   `diagnostics` is off, provided `stats = true`.
+
 ## One-hour A/B runs (older procedure)
 
 1. Charge the watch until `pmu` reports `charging no` at 97–100%.

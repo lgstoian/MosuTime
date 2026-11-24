@@ -52,6 +52,8 @@ changed to make the emulator work.
 | 33 | Background logs and polling kept a task awake | yes | done: quiet profile, 100 panel cycles |
 | 34 | Panel sleep-in loses the GRAM and can flash white | yes: 100 cycles | done: black fill before display-on |
 | 35 | Watch ran ~110 mA with the face off: LVGL task kept core 1 awake | yes: SD log + sleep counter | done: suspend LVGL task while off |
+| 36 | `sleep_entries = 0` in the log could mean "console opened", not "not sleeping" | yes: RTC no-init + log gate | done: counter survives reconnect; checker rejects a stuck counter |
+| 37 | `luni` sounded foreign with the dictionary single palatal | yes: espeak-trained token | pending: listen to `luni_compare.wav` on the watch |
 
 ## 1. SD mount blocking boot
 
@@ -978,6 +980,65 @@ still wakes and draws correctly.
 
 Runtime has not yet been measured from 100% to empty with the final firmware;
 `/sdcard/power.log` is cleared and armed for that optional confirmation.
+
+## 36. A zero sleep count in the log was a false green
+
+**Symptom.** The captured `/sdcard/power.log` ends a discharge run with
+`sleep_entries = 0` after a USB reconnect, even though the preceding samples
+show 1.95 million entries. A reader — or a CI check that only counts rows — can
+take that zero as proof that the chip never slept, or take the mere existence of
+the file as proof that the power fix held.
+
+**Cause.** The counter was a RAM-only `volatile uint32_t`. Opening the USB
+console resets the CPU, so every reconnect put it back to zero while the rest of
+the power counters already lived in `.rtc.noinit`. The log format also has no
+header or run marker: a card can hold several nights of samples, and comparing
+across a recharge invents battery rises that never happened in one run.
+
+**Fix.** `s_sleep_entries` now lives in RTC no-init memory with the other power
+counters, and the stats magic was bumped so an old layout is never reinterpreted.
+The PM callback is registered even when diagnostics are off, so a `sleep : 0`
+line in `stats` means the chip really did not sleep. `stats` prints
+`sleep : N light-sleep entries (survives console reconnect)`.
+`tools/check_power_log.py` parses a captured log, splits it at recharges and
+reboots, and fails on a stalled or falling sleep counter, a screen left on, a
+battery that rises inside a discharge run, or a sampling gap. Its `--selftest`
+feeds it four known-bad logs so the gate itself cannot be decorative.
+
+**Fix lives in.** [`main/app_main.c`](../main/app_main.c),
+[`components/mosu_diag/src/mosu_diag.c`](../components/mosu_diag/src/mosu_diag.c),
+[`components/mosu_diag/include/mosu_diag.h`](../components/mosu_diag/include/mosu_diag.h),
+[`tools/check_power_log.py`](../tools/check_power_log.py).
+
+**Verification.** The checker passes the 1596-row log captured from the watch
+(26.6 h, 99% → 82%, 1602 sleeps/min, screen on in 15% of samples) and its
+selftest rejects all four bad logs. The counter is currently being re-verified
+on the real watch after flashing this firmware: a `stats` read before and after
+a reconnect must show the same number.
+
+## 37. `luni` sounded foreign with the dictionary single palatal
+
+**Symptom.** After the weekdays were corrected to dictionary pronunciation,
+the listener reported that all seven were better but `luni` was the one that
+still sounded off.
+
+**Cause.** The `ro_RO-mihai-medium` model card declares `phoneme_type: espeak`
+and the Romanian `ro` voice. Its training counts contain `ɾ` but never `r`, and
+never the single-character affricate `ʦ` — so espeak-ng, not dictionary IPA, is
+the authority for the strings this voice can say naturally. espeak-ng produced
+a doubled palatal for `luni` (`lˈunʲʲ`); the dictionary form `/ˈlunʲ/` is
+linguistically right but is not the token the model learned for this word.
+
+**Fix.** Keep dictionary stress and the tap `ɾ` for all weekdays (the research
+confirmed `miercuri` /ˈmjer.kurʲ/ and `duminică` /duˈminikə/), and restore the
+espeak-trained doubled palatal only for `luni`. `luni_compare.wav` renders the
+single palatal, the doubled palatal and a palatal glide for a listening check.
+
+**Fix lives in.** [`tools/mosu_g2p.py`](../tools/mosu_g2p.py) (`LEXICON`).
+
+**Verification.** `mosu_g2p.py --selftest` passes and `check_voice.py` accepts
+all 78 clips. A native listening check of `luni_compare.wav` on the watch is
+still pending; an ASR transcript is not a Romanian ear.
 
 ## Adding a finding
 

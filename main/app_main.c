@@ -64,7 +64,7 @@ static bool s_usb_lock_held;
 /* Bump when the RTC_NOINIT layout changes: the magic only says "this block was
  * written by this firmware", and reusing it across a layout change would
  * interpret old bytes as new counters. */
-#define MOSU_STATS_MAGIC 0x4D4F5356u
+#define MOSU_STATS_MAGIC 0x4D4F5357u
 /* RTC_NOINIT, not RTC_DATA: a plain CPU reset (the USB console opening does
  * one) re-initialises .rtc.data, while .rtc.noinit survives it. */
 RTC_NOINIT_ATTR static uint32_t s_stats_magic;
@@ -74,6 +74,11 @@ RTC_NOINIT_ATTR static uint32_t s_baseline_epoch;
 RTC_NOINIT_ATTR static uint8_t s_boot_pct;
 RTC_NOINIT_ATTR static bool s_boot_pct_set;
 RTC_NOINIT_ATTR static uint32_t s_boot_count;
+/* Light-sleep entries used to be RAM-only, so opening the USB console reset
+ * them to zero.  A zero in /sdcard/power.log then looked like "the chip never
+ * slept" when it only meant "the console was opened".  Keep the counter in
+ * no-init memory next to the other power counters. */
+RTC_NOINIT_ATTR static uint32_t s_sleep_entries;
 RTC_NOINIT_ATTR static uint32_t s_raise_fired;
 RTC_NOINIT_ATTR static uint32_t s_raise_candidates;
 RTC_NOINIT_ATTR static int16_t s_last_raise_nz_milli;
@@ -98,9 +103,9 @@ typedef struct {
 
 static mosu_pwrlog_t s_last_log;
 
-/* Set by the PM light-sleep callback.  Tells us whether the chip really
- * sleeps between the app task's 100 ms polls. */
-static volatile uint32_t s_sleep_entries;
+/* s_sleep_entries is declared with the RTC_NOINIT counters above.  The PM
+ * callback below tells us whether the chip really sleeps between the app
+ * task's 100 ms polls. */
 
 static esp_err_t sleep_enter_cb(int64_t sleep_time_us, void *arg)
 {
@@ -236,6 +241,7 @@ static void stats_init(void)
     s_boot_pct = 0;
     s_boot_pct_set = false;
     s_boot_count = 1;
+    s_sleep_entries = 0;
 }
 
 static mosu_session_t s_session;
@@ -605,9 +611,7 @@ static void diag_stats(mosu_diag_stats_t *out)
     out->raise_candidates = s_raise_candidates;
     out->wifi_on_s = mosu_net_wifi_on_ms() / 1000u;
     out->audio_on_s = mosu_audio_on_ms() / 1000u;
-    if (s_cfg.device.diagnostics) {
-        ESP_LOGI(TAG, "sleep entries: %u", (unsigned)s_sleep_entries);
-    }
+    out->sleep_entries = s_sleep_entries;
     out->last_raise_deg = s_last_raise_deg;
     out->last_nz_milli = s_last_raise_nz_milli;
     out->angle_deg = (uint8_t)mosu_power_learn_angle(
@@ -788,15 +792,16 @@ void app_main(void)
         mosu_power_init(&s_cfg);
         esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "mosu_usb",
                            &s_usb_awake_lock);
-        if (s_cfg.device.diagnostics) {
-            esp_pm_sleep_cbs_register_config_t cbs = {
-                .enter_cb = sleep_enter_cb,
-                .exit_cb = NULL,
-            };
-            esp_err_t cb_err = esp_pm_light_sleep_register_cbs(&cbs);
-            if (cb_err != ESP_OK) {
-                ESP_LOGW(TAG, "sleep callback: %s", esp_err_to_name(cb_err));
-            }
+        /* Count light sleep whenever stats are available, not only while a
+         * discharge log is being written: a `sleep : 0` line in `stats` must
+         * mean "the chip did not sleep", not "diagnostics was off". */
+        esp_pm_sleep_cbs_register_config_t cbs = {
+            .enter_cb = sleep_enter_cb,
+            .exit_cb = NULL,
+        };
+        esp_err_t cb_err = esp_pm_light_sleep_register_cbs(&cbs);
+        if (cb_err != ESP_OK) {
+            ESP_LOGW(TAG, "sleep callback: %s", esp_err_to_name(cb_err));
         }
         err = mosu_ui_create(&s_cfg);
         if (err == ESP_OK) {

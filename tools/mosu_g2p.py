@@ -20,9 +20,12 @@ Conventions, all taken from the voice's training distribution:
 * `ˈ` marks the stressed syllable, `ˌ` a secondary stress.  The model is
   sensitive to them: dropping `ˈ` changes the word.
 * Final `-i` after a consonant is the non-syllabic `ʲ` (`cinci` -> `tʃintʃʲ`).
-* The weekday names use a single `ʲ`, as in Romanian dictionaries
-  (`luni` /ˈlunʲ/, `marți` /marʦʲ/). An earlier version doubled it, which
-  lengthened the palatal and made the day names sound foreign.
+* Weekdays follow dictionary stress and segment quality (`miercuri`
+  /ˈmjer.kurʲ/, `duminică` /duˈminikə/) with the voice's tap `ɾ`.  One
+  exception: `luni` keeps the doubled `lˈunʲʲ` that espeak-ng produced for
+  this voice's training data.  Dictionary /ˈlunʲ/ is linguistically right,
+  but the single `ʲ` made this short clip sound the most foreign of the
+  seven, so the trained token wins here.
 * The diphthongs are spelled the way the voice expects, which is not textbook
   IPA: `trei` -> `tɾeɪ`, `șaisprezece` -> `ʃaɪspɾezetʃe`, `douăzeci` ->
   `doʊəzetʃʲ`.  Rewriting them as `ej`/`aj`/`owə` makes the model babble.
@@ -79,7 +82,7 @@ LEXICON = {
     "patruzeci": "pˌatɾuzˈetʃʲ",
     "cincizeci": "tʃˌintʃizˈetʃʲ",
     # Weekdays: "Luni."
-    "luni": "lˈunʲ",
+    "luni": "lˈunʲʲ",
     "marți": "mˈartsʲ",
     "miercuri": "ˈmjeɾkurʲ",
     "joi": "ʒˈoj",
@@ -163,7 +166,7 @@ def selftest() -> int:
     expect("și două minute.", "ʃi dˈouˌə minˈute.")
     expect("și treizeci de minute.", "ʃi tɾˌeizˈetʃʲ de minˈute.")
     # Punctuation keeps its place, stress marks survive.
-    expect("Luni.", "lˈunʲ.")
+    expect("Luni.", "lˈunʲʲ.")
     expect("Este ora unu", "jˌeste ˈoɾa ˈunu")
     expect("Este ora douăsprezece", "jˌeste ˈoɾa dˈouˌəspɾezˌetʃe")
 

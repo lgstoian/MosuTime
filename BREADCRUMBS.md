@@ -51,7 +51,7 @@ For the product constraints and the rules of the road, read
 | Capture the real watch's face on hardware | `screenshot /sdcard/shot.bmp` on the console, [`components/mosu_ui/src/mosu_ui.c`](components/mosu_ui/src/mosu_ui.c) (`mosu_ui_snapshot`) |
 | Generate or validate the Romanian voice clips | [`tools/gen_voice.py`](tools/gen_voice.py), [`tools/mosu_g2p.py`](tools/mosu_g2p.py), [`tools/check_voice.py`](tools/check_voice.py), [`docs/voice.md`](docs/voice.md) |
 | Change how a word is pronounced | [`tools/mosu_g2p.py`](tools/mosu_g2p.py) (`LEXICON`), then `--selftest` |
-| Estimate battery life or record a measurement | [`tools/power_budget.py`](tools/power_budget.py), [`docs/power.md`](docs/power.md) |
+| Estimate battery life, record a measurement or gate a captured power log | [`tools/power_budget.py`](tools/power_budget.py), [`tools/check_power_log.py`](tools/check_power_log.py), [`docs/power.md`](docs/power.md), [`docs/audit.md`](docs/audit.md) |
 | Check accessibility, contrast or physical digit size | [`tools/contact_sheet.py`](tools/contact_sheet.py), [`docs/accessibility/README.md`](docs/accessibility/README.md) |
 | Give the watch to the family / explain it in Romanian | [`docs/family-ro.md`](docs/family-ro.md) |
 | Update firmware, config or a card in the field | [`docs/maintenance.md`](docs/maintenance.md) |
@@ -109,6 +109,7 @@ replaces [`docs/bringup.md`](docs/bringup.md).
 | [`tools/mosu_g2p.py`](tools/mosu_g2p.py) | Romanian pronunciation: a 38-word IPA lexicon plus the `și` sandhi rule. `--selftest` checks the rules, `--plan` prints all 78 phrases with their phonemes. |
 | [`tools/check_voice.py`](tools/check_voice.py) | Verifies a voice folder: exact names, mono 16-bit WAV, no clipping, no silent clips, and a duration that matches the phrase each clip says. |
 | [`tools/power_budget.py`](tools/power_budget.py) | First-order current/runtime model. Reads the shipped config and lets every current be overridden with a flag. |
+| [`tools/check_power_log.py`](tools/check_power_log.py) | Validates a captured `/sdcard/power.log`: continuous samples, battery falling only while uncharged, face mostly off and a rising light-sleep counter. `--selftest` supplies four known-bad logs. |
 | [`tools/contact_sheet.py`](tools/contact_sheet.py) | Drives the simulator, builds the 16-scene accessibility sheet and regenerates `docs/accessibility/README.md` / `hours.png`. |
 | [`tools/emu/capture.sh`](tools/emu/capture.sh) | Emulator capture cases: AM, PM with `settime`, unknown time, low battery. |
 | [`tools/emu/smoke.sh`](tools/emu/smoke.sh) | Drives touch and IMU against the real firmware and asserts on the UART log and QSPI stream. |
