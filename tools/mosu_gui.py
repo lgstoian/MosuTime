@@ -7,8 +7,8 @@ Tabs:
   Dashboard  live status, battery, network, SD, quick actions
   Console    raw console with the same commands as the serial terminal
   Firmware   build and flash through tools/build.ps1, with a live log
-  SD card    format the card, push mosu.cfg and the voice clips
-  Power      battery detail and a graceful shutdown
+  SD card    format the card, push config, all voice clips or only the WAVs
+  Power      battery detail, the power-log gate and a graceful shutdown
 
 Everything goes through the USB Serial/JTAG port that also flashes the board,
 so one cable is enough.  Run with:
@@ -23,6 +23,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import tkinter as tk
@@ -40,7 +41,7 @@ except ImportError:
 
 FROZEN = bool(getattr(sys, "frozen", False))
 APP_NAME = "MosuTime Manager"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.4"
 
 
 def find_repo(start):
@@ -69,6 +70,11 @@ else:
     RES_DIR = ROOT
     SD_CFG = os.path.join(ROOT, "sd_card", "mosu.cfg")
     SD_VOICE = os.path.join(ROOT, "sd_card", "voice")
+
+def tool_script(name):
+    """Find a bundled tool script in the exe or the source checkout."""
+    return os.path.join(RES_DIR, "tools", name)
+
 
 ICON = os.path.join(RES_DIR, "tools", "mosu.ico")
 STATE_DIR = DATA_DIR if FROZEN else os.path.join(
@@ -728,6 +734,7 @@ class App:
         self.d_uptime = self.add_row(power, "Uptime", "-")
         self.d_screen = self.add_row(power, "Screen time", "-")
         self.d_wakes = self.add_row(power, "Wakes", "-")
+        self.d_sleep = self.add_row(power, "Light sleeps", "-")
         self.d_auto = self.add_row(power, "Auto policy", "-")
 
         actions = self.card(grid, "Actions")
@@ -1104,6 +1111,9 @@ class App:
                    command=self.format_card).pack(side="left")
         ttk.Button(bar, text="Push config and voice", style="Accent.TButton",
                    command=self.push_sd).pack(side="left", padx=8)
+        ttk.Button(bar, text="Push voice only",
+                   command=lambda: self.push_sd(voice_only=True)).pack(
+                       side="left", padx=8)
         ttk.Button(bar, text="List files",
                    command=lambda: self.quick("ls /sdcard")).pack(side="left")
         ttk.Button(bar, text="Check voice",
@@ -1140,6 +1150,22 @@ class App:
         note.pack(anchor="w", pady=(16, 10))
         ttk.Button(self.tab_power, text="Shut down now", style="Danger.TButton",
                    command=self.shutdown).pack(anchor="w")
+
+        gate = self.card(self.tab_power, "Power log gate")
+        gate.pack(fill="both", expand=True, pady=(16, 0))
+        ttk.Label(
+            gate,
+            text="Read /sdcard/power.log from the watch and check that the "
+                 "chip really slept, the face was mostly off and the battery "
+                 "only fell while unplugged. Requires diagnostics = true "
+                 "during the run.",
+            style="Muted.TLabel", wraplength=900, justify="left").pack(
+                anchor="w", pady=(6, 8))
+        ttk.Button(gate, text="Check power log",
+                   command=self.check_power_log).pack(anchor="w")
+        self.p_log_text = tk.Text(gate, height=9, wrap="none")
+        self.p_log_text.pack(fill="both", expand=True, pady=(10, 6))
+        self.p_log_text.configure(state="disabled")
 
     # -------------------------------------------------------------- helpers
 
@@ -1352,7 +1378,7 @@ class App:
     def parse_dashboard(self, lines):
         app = idf = mac = chip = ""
         clock = tz = net = sync = batt = charge = sd = audio = ""
-        uptime = screen = wakes = auto = ""
+        uptime = screen = wakes = auto = sleep = ""
         for line in lines:
             s = line.strip()
             if s.startswith("app    :"):
@@ -1382,6 +1408,8 @@ class App:
                     screen = parts[1].replace("screen on ", "")
                 if len(parts) > 2:
                     wakes = parts[2]
+            elif s.startswith("sleep :"):
+                sleep = s.split(":", 1)[1].strip()
             elif s.startswith("auto  :"):
                 auto = s.split(":", 1)[1].strip()
             elif s.startswith("display :"):
@@ -1433,6 +1461,8 @@ class App:
             self.d_screen.set(screen)
         if wakes:
             self.d_wakes.set(wakes)
+        if sleep:
+            self.d_sleep.set(sleep)
         if auto:
             self.d_auto.set(auto)
         if not (app or clock or batt):
@@ -1628,20 +1658,28 @@ class App:
 
         self.run_worker(work, "Formatting the card...")
 
-    def push_sd(self):
-        if not os.path.isfile(SD_CFG):
-            messagebox.showerror("MosuTime Manager", "sd_card/mosu.cfg is missing.")
-            return
-        if not self.settings_save(silent=True):
-            return
-        names = []
-        if os.path.isdir(SD_VOICE):
-            names = sorted(n for n in os.listdir(SD_VOICE) if n.endswith(".wav"))
+    def voice_files(self):
+        if not os.path.isdir(SD_VOICE):
+            return []
+        return sorted(n for n in os.listdir(SD_VOICE) if n.endswith(".wav"))
+
+    def push_sd(self, voice_only=False):
+        names = self.voice_files()
+        if not voice_only:
+            if not os.path.isfile(SD_CFG):
+                messagebox.showerror(
+                    "MosuTime Manager", "sd_card/mosu.cfg is missing.")
+                return
+            if not self.settings_save(silent=True):
+                return
         total = sum(os.path.getsize(os.path.join(SD_VOICE, n)) for n in names)
+        what = ("%d voice clips" % len(names) if voice_only else
+                "mosu.cfg and %d voice clips" % len(names))
         if not messagebox.askyesno(
                 "MosuTime Manager",
-                "Push mosu.cfg and %d voice clips (%d KiB) to the card?"
-                % (len(names), total // 1024)):
+                "Push %s (%d KiB) to the card?%s"
+                % (what, total // 1024,
+                   "\n\nmosu.cfg is left untouched." if voice_only else "")):
             return
 
         def work():
@@ -1649,9 +1687,11 @@ class App:
             self.device.drain(0.2)
             self.device.send("md /sdcard/voice")
             self.device.drain(0.3)
-            with open(SD_CFG, "rb") as handle:
-                cfg = handle.read()
-            ok = self.push_file("/sdcard/mosu.cfg", cfg, "mosu.cfg")
+            ok = True
+            if not voice_only:
+                with open(SD_CFG, "rb") as handle:
+                    cfg = handle.read()
+                ok = self.push_file("/sdcard/mosu.cfg", cfg, "mosu.cfg")
             done = 0
             if ok and names:
                 for index, name in enumerate(names, 1):
@@ -1680,9 +1720,9 @@ class App:
         self.run_worker(work, "Pushing files...")
 
     def check_voice(self):
-        script = os.path.join(ROOT, "tools", "check_voice.py")
+        script = tool_script("check_voice.py")
         if not os.path.isfile(script):
-            messagebox.showerror("MosuTime Manager", "tools/check_voice.py is missing.")
+            messagebox.showerror("MosuTime Manager", "%s is missing." % script)
             return
 
         def work():
@@ -1705,6 +1745,58 @@ class App:
         self.sd_text.insert("end", text + "\n")
         self.sd_text.see("end")
         self.sd_text.configure(state="disabled")
+
+    def check_power_log(self):
+        script = tool_script("check_power_log.py")
+        if not os.path.isfile(script):
+            messagebox.showerror(
+                "MosuTime Manager", "%s is missing." % script)
+            return
+
+        def work():
+            previous_log = self.device.log
+            path = None
+            try:
+                self.device.drain(0.2)
+                self.device.log = lambda _line: None
+                self.device.send("cat /sdcard/power.log")
+                lines = self.device.capture(25.0)
+                rows = [line for line in lines
+                        if re.match(r"^\d{9,},\d+,\d+,\d+,\d+,\d+,\d+,\d+$",
+                                    line.strip())]
+                self.ui(self._append_power,
+                        "read %d rows from /sdcard/power.log" % len(rows))
+                if not rows:
+                    return
+                with tempfile.NamedTemporaryFile(
+                        mode="w", encoding="utf-8", suffix=".log",
+                        delete=False) as handle:
+                    handle.write("\n".join(rows) + "\n")
+                    path = handle.name
+                proc = subprocess.run(
+                    [sys.executable, script, "--allow-gaps", path],
+                    cwd=ROOT or RES_DIR, stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+                    errors="replace", timeout=60)
+                for line in proc.stdout.splitlines():
+                    self.ui(self._append_power, line)
+                self.ui(self._append_power,
+                        "== %s ==" % ("PASS" if proc.returncode == 0
+                                      else "FAIL"))
+            except Exception as exc:  # noqa: BLE001 - show the serial error
+                self.ui(self._append_power, "!! %s" % exc)
+            finally:
+                self.device.log = previous_log
+                if path and os.path.isfile(path):
+                    os.unlink(path)
+
+        self.run_worker(work, "Checking power log...")
+
+    def _append_power(self, text):
+        self.p_log_text.configure(state="normal")
+        self.p_log_text.insert("end", text + "\n")
+        self.p_log_text.see("end")
+        self.p_log_text.configure(state="disabled")
 
     def factory_reset(self):
         if not self.device.open:
@@ -1812,6 +1904,8 @@ def selftest():
         "net    : state 2, ip 192.168.1.252, rssi -77",
         "power  : 4180 mV, 98%, charging 1, vbus 1",
         "audio  : idle",
+        "stats : up 0h02m, screen on 0m (2%), 3 wakes, 4 boots",
+        "sleep : 2923 light-sleep entries (survives console reconnect)",
     ])
     root.update()
     assert app.d_batt.get() == "4180 mV", app.d_batt.get()
@@ -1819,6 +1913,21 @@ def selftest():
     assert app.p_bar["value"] == 98
     assert app.d_tz.get() == "Europe/Bucharest"
     assert app.d_sd.get() == "mounted"
+    assert app.d_sleep.get().startswith("2923"), app.d_sleep.get()
+    assert app.d_wakes.get() == "3 wakes", app.d_wakes.get()
+
+    # The manager must not offer defaults that differ from the shipped card.
+    defaults = {(field.section, field.key): field.default for field in SCHEMA}
+    assert defaults[("display", "motion_poll_hz")] == 8
+    assert defaults[("display", "screen_on_ms")] == 11250
+    assert defaults[("clock", "sync_hours")] == 12
+    assert defaults[("device", "log_level")] == "error"
+    assert defaults[("device", "stats")] is False
+    assert defaults[("device", "diagnostics")] is False
+    for name in ("check_voice.py", "check_power_log.py"):
+        assert os.path.isfile(tool_script(name)), tool_script(name)
+    names = app.voice_files()
+    assert "d_0.wav" in names and "luni_compare.wav" in names, names
     cfg = ConfigFile(SD_CFG)
     original = cfg.get("display", "brightness")
     cfg.set("display", "brightness", "42")
@@ -1908,6 +2017,27 @@ def autotest(port, log_path=None, image=None):
         clips = dev.capture(1.0)
         count = next((l for l in clips if "entries" in l), "?")
         say("voice folder: %s" % count)
+        compare = any("luni_compare.wav" in line for line in clips)
+        say("weekday preview: %s" % ("PASS" if compare else "FAIL"))
+        ok &= compare
+
+        dev.send("config")
+        config_lines = dev.capture(1.0)
+        config_text = "\n".join(config_lines)
+        defaults_ok = ("poll 8 Hz" in config_text and
+                       "screen on 11250 ms" in config_text and
+                       "sync 0/day" in config_text)
+        say("shipped defaults: %s" % ("PASS" if defaults_ok else "FAIL"))
+        ok &= defaults_ok
+
+        dev.send("stats")
+        stat_lines = dev.capture(0.9)
+        stat_text = "\n".join(stat_lines)
+        quiet = "stats : disabled" in stat_text
+        sleeps = any(line.startswith("sleep :") for line in stat_lines)
+        say("quiet by default: %s" % ("PASS" if quiet else "FAIL"))
+        say("sleep counter: %s" % ("PASS" if (quiet or sleeps) else "FAIL"))
+        ok &= quiet or sleeps
 
         if image:
             dev.close()

@@ -57,6 +57,8 @@ try {
     $cfgData = (Join-Path $root "sd_card\mosu.cfg") + ";sd_card"
     $voiceData = (Join-Path $root "sd_card\voice") + ";sd_card/voice"
     $iconData = (Join-Path $root "tools\mosu.ico") + ";tools"
+    $voiceCheckData = (Join-Path $root "tools\check_voice.py") + ";tools"
+    $powerCheckData = (Join-Path $root "tools\check_power_log.py") + ";tools"
     $icon = Join-Path $root "tools\mosu.ico"
     & $systemPython -m PyInstaller --noconfirm --clean --onefile --windowed `
         --name MosuTimeManager `
@@ -64,6 +66,8 @@ try {
         --add-data $cfgData `
         --add-data $voiceData `
         --add-data $iconData `
+        --add-data $voiceCheckData `
+        --add-data $powerCheckData `
         --collect-all esptool `
         --hidden-import serial `
         --hidden-import serial.tools.list_ports `
