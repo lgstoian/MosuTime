@@ -1,8 +1,8 @@
 # Power
 
 The watch is designed to spend almost all of its life with the panel off, the
-LVGL task stopped, the radio off, and the CPU in automatic light sleep between
-accelerometer samples. This page explains where the remaining current goes,
+LVGL tick stopped and its task parked on a 50 ms wait, the radio off, and the
+CPU in automatic light sleep between accelerometer samples. This page explains where the remaining current goes,
 how to force each state, how to measure it, and what counts as acceptable.
 
 **Every current on this page is an estimate until it has been measured.** The
@@ -201,7 +201,9 @@ Production is silent unless something fails:
 * The console blocks on the USB driver instead of polling every 200 ms, and
   the network task sleeps until the next scheduled sync or presence scan.
 * `screen_on_ms = 11250` (25% below the old 15 s; the hourly learner can
-  shorten it to 8 s).
+  shorten it to 8 s). The 50 ms LVGL task wait floor is re-applied by
+  `tools/patch_lvgl.py` on every build because `managed_components/` is not
+  committed.
 * The FT3168 touch controller scans every 80 ms in monitor mode (register
   `0x89`) instead of the vendor's 40 ms, and enters monitor 1 s after the last
   contact. The first contact still switches it to active mode at 12 ms.

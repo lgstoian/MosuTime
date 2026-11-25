@@ -110,6 +110,7 @@ replaces [`docs/bringup.md`](docs/bringup.md).
 | [`tools/check_voice.py`](tools/check_voice.py) | Verifies a voice folder: exact names, mono 16-bit WAV, no clipping, no silent clips, and a duration that matches the phrase each clip says. |
 | [`tools/power_budget.py`](tools/power_budget.py) | First-order current/runtime model. Reads the shipped config and lets every current be overridden with a flag. |
 | [`tools/check_power_log.py`](tools/check_power_log.py) | Validates a captured `/sdcard/power.log`: continuous samples, battery falling only while uncharged, face mostly off and a rising light-sleep counter. `--selftest` supplies four known-bad logs. |
+| [`tools/patch_lvgl.py`](tools/patch_lvgl.py) | Re-applies the 50 ms LVGL task wait floor to the ignored managed component after each dependency fetch. Called by `tools/build.ps1` and CI; `--selftest` proves the patch still matches upstream 2.9.0. |
 | [`tools/contact_sheet.py`](tools/contact_sheet.py) | Drives the simulator, builds the 16-scene accessibility sheet and regenerates `docs/accessibility/README.md` / `hours.png`. |
 | [`tools/emu/capture.sh`](tools/emu/capture.sh) | Emulator capture cases: AM, PM with `settime`, unknown time, low battery. |
 | [`tools/emu/smoke.sh`](tools/emu/smoke.sh) | Drives touch and IMU against the real firmware and asserts on the UART log and QSPI stream. |

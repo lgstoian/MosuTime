@@ -31,6 +31,11 @@ jobs:
       - name: Check the power log gate
         run: python tools/check_power_log.py --selftest
 
+      # The 50 ms LVGL wait floor lives in an ignored managed component; prove
+      # the patch still applies before the firmware job rebuilds from scratch.
+      - name: Check the LVGL patch
+        run: python tools/patch_lvgl.py --selftest
+
       - name: Configure and run the host tests
         run: |
           cmake -S test/host -B test/host/build -DCMAKE_BUILD_TYPE=Debug
@@ -64,6 +69,7 @@ jobs:
           esp_idf_version: v5.5.5
           target: esp32s3
           path: "."
+          command: idf.py reconfigure && python3 tools/patch_lvgl.py && idf.py build
 
       # Informational only: reuse the build directory from the previous step
       # and print the size report.  A size regression must not hide the build

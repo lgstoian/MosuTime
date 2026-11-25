@@ -57,6 +57,13 @@ try {
     if ($Clean) {
         idf.py fullclean
     }
+    # Fetch managed components first, then re-apply the 50 ms LVGL wait floor.
+    # managed_components/ is ignored, so this patch must be reproducible from
+    # a fresh checkout; a plain `idf.py build` alone would silently drop it.
+    idf.py reconfigure
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    & python (Join-Path $PSScriptRoot "patch_lvgl.py")
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     idf.py build
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 

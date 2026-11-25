@@ -51,7 +51,7 @@ changed to make the emulator work.
 | 32 | AXP2101 left eight unused rails enabled | yes: rail dump | done: rails off, I2C/SD/audio still pass |
 | 33 | Background logs and polling kept a task awake | yes | done: quiet profile, 100 panel cycles |
 | 34 | Panel sleep-in loses the GRAM and can flash white | yes: 100 cycles | done: black fill before display-on |
-| 35 | Watch ran ~110 mA with the face off: LVGL task kept core 1 awake | yes: SD log + sleep counter | done: suspend LVGL task while off |
+| 35 | Watch ran ~110 mA with the face off: LVGL task kept core 1 awake | yes: SD log + sleep counter | done: 50 ms task wait floor; suspend was tried and reverted |
 | 36 | `sleep_entries = 0` in the log could mean "console opened", not "not sleeping" | yes: RTC no-init + log gate | done: counter survives reconnect; checker rejects a stuck counter |
 | 37 | `luni` sounded foreign with the dictionary single palatal | yes: espeak-trained token | done: wearer confirmed the doubled-palatal clip |
 
@@ -959,13 +959,19 @@ spinning loop in our code. Two contributors were found and removed:
    reinit it before the next one.
 2. The LVGL port task ("taskLVGL") wakes core 1 every millisecond even with
    `lvgl_port_stop()` and its tick timer stopped. On a dual-core ESP32-S3 that
-   prevents automatic light sleep. The task is now suspended whenever the face
-   is off and resumed before LVGL is resumed on wake. The touch GPIO wake is
-   independent of that task and still wakes the app.
+   prevents automatic light sleep. The final fix gives the task a 50 ms wait
+   floor while the face is off, so it no longer ticks core 1 every millisecond;
+   the tick timer is still stopped. Suspending the task outright and explicitly
+   starting light sleep were both tried and reverted after hard lockups, so the
+   wait floor is the change that shipped. The touch GPIO wake is independent of
+   that task and still wakes the app.
 
 **Fix lives in.**
 [`components/mosu_net/src/mosu_net.c`](../components/mosu_net/src/mosu_net.c),
-[`main/app_main.c`](../main/app_main.c).
+[`main/app_main.c`](../main/app_main.c), and
+[`tools/patch_lvgl.py`](../tools/patch_lvgl.py), which re-applies the wait floor
+to the ignored `managed_components/` copy on every build. A fresh checkout
+without that script would silently lose the fix.
 
 **Verification.** In a two-minute unplugged run after the LVGL change,
 `sleep_entries` rose from 0 to 1203 (roughly 10 sleeps/s, matching the 100 ms
