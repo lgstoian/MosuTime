@@ -54,6 +54,7 @@ changed to make the emulator work.
 | 35 | Watch ran ~110 mA with the face off: LVGL task kept core 1 awake | yes: SD log + sleep counter | done: 50 ms task wait floor; suspend was tried and reverted |
 | 36 | `sleep_entries = 0` in the log could mean "console opened", not "not sleeping" | yes: RTC no-init + log gate | done: counter survives reconnect; checker rejects a stuck counter |
 | 37 | `luni` sounded foreign with the dictionary single palatal | yes: espeak-trained token | done: wearer confirmed the doubled-palatal clip |
+| 38 | Clean CI build failed on the WiFi AMPDU RX window | yes: explicit default | done: fresh-defaults build and CI both green |
 
 ## 1. SD mount blocking boot
 
@@ -1050,6 +1051,30 @@ single palatal, the doubled palatal and a palatal glide for a listening check.
 all 78 clips. The wearer listened to `luni_compare.wav` on the watch and
 confirmed the restored doubled-palatal variant sounds right; the clips were
 pushed to the card and the voice gate passed again before release.
+
+## 38. A clean CI build failed on the WiFi AMPDU RX window
+
+**Symptom.** The `ESP-IDF build` CI job stopped after about two minutes in
+`esp_wifi/src/wifi_init.c` with `#error "WiFi configuration check: WARNING,
+WIFI_RX_BA_WIN should not be larger than double of the WIFI_STATIC_RX_BUFFER_NUM!"`.
+Local builds passed, and the failure also appeared on commits before the
+power-log and voice changes, so it was not caused by those changes.
+
+**Cause.** `sdkconfig.defaults` enables `SPIRAM_TRY_ALLOCATE_WIFI_LWIP` and sets
+four static RX buffers. With PSRAM allocation enabled, the Kconfig default for
+`ESP_WIFI_RX_BA_WIN` becomes 16, and IDF rejects 16 > 2 × 4. The developer's
+`sdkconfig` had an explicit `CONFIG_ESP_WIFI_RX_BA_WIN=6`, so only a fresh build
+from defaults — exactly what CI does — saw the bad default.
+
+**Fix.** Pin `CONFIG_ESP_WIFI_RX_BA_WIN=6` in `sdkconfig.defaults`, matching the
+firmware that is on the watch and in the v1.1.4 release. The published image is
+unchanged because it was already built with 6.
+
+**Fix lives in.** [`sdkconfig.defaults`](../sdkconfig.defaults).
+
+**Verification.** A build in a new `build-ci` directory with only
+`sdkconfig.defaults` completed all 2030 steps, and CI run 45595272235 passed all
+three jobs (host, static analysis, ESP-IDF build) including the LVGL patch step.
 
 ## Adding a finding
 
