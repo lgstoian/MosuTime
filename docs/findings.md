@@ -53,7 +53,7 @@ changed to make the emulator work.
 | 34 | Panel sleep-in loses the GRAM and can flash white | yes: 100 cycles | done: black fill before display-on |
 | 35 | Watch ran ~110 mA with the face off: LVGL task kept core 1 awake | yes: SD log + sleep counter | done: suspend LVGL task while off |
 | 36 | `sleep_entries = 0` in the log could mean "console opened", not "not sleeping" | yes: RTC no-init + log gate | done: counter survives reconnect; checker rejects a stuck counter |
-| 37 | `luni` sounded foreign with the dictionary single palatal | yes: espeak-trained token | pending: listen to `luni_compare.wav` on the watch |
+| 37 | `luni` sounded foreign with the dictionary single palatal | yes: espeak-trained token | done: wearer confirmed the doubled-palatal clip |
 
 ## 1. SD mount blocking boot
 
@@ -978,8 +978,10 @@ and releases it on battery (USB Serial/JTAG cannot wake the chip from light
 sleep on this board). Ten off/on cycles and a screenshot confirmed the face
 still wakes and draws correctly.
 
-Runtime has not yet been measured from 100% to empty with the final firmware;
-`/sdcard/power.log` is cleared and armed for that optional confirmation.
+A 100% → 40% soak over 22.04 h was completed on the v1.1.4 candidate with the
+face off in 99.6% of samples and 1536 light-sleep entries per minute; it did not
+reach empty, so the earlier 25.9 h full discharge remains the end-to-end
+runtime figure. `/sdcard/power.log` holds both runs.
 
 ## 36. A zero sleep count in the log was a false green
 
@@ -1010,11 +1012,13 @@ feeds it four known-bad logs so the gate itself cannot be decorative.
 [`components/mosu_diag/include/mosu_diag.h`](../components/mosu_diag/include/mosu_diag.h),
 [`tools/check_power_log.py`](../tools/check_power_log.py).
 
-**Verification.** The checker passes the 1596-row log captured from the watch
-(26.6 h, 99% → 82%, 1602 sleeps/min, screen on in 15% of samples) and its
-selftest rejects all four bad logs. The counter is currently being re-verified
-on the real watch after flashing this firmware: a `stats` read before and after
-a reconnect must show the same number.
+**Verification.** The checker's selftest rejects all four bad logs. On the
+watch, a 2-minute unplugged run left `stats` reporting 2923 sleep entries after
+the USB console was reopened — the old code would have shown 0. The 22 h soak
+then produced 2,006,672 entries in `stats` and 1,989,660 across its discharge
+rows; the 1017-row log passes `check_power_log.py --allow-gaps` (100% → 40% in
+22.04 h, 0.4% screen-on samples). Temporary `stats` and `diagnostics` were
+turned off again afterwards and `stats` now reports "disabled".
 
 ## 37. `luni` sounded foreign with the dictionary single palatal
 
@@ -1037,8 +1041,9 @@ single palatal, the doubled palatal and a palatal glide for a listening check.
 **Fix lives in.** [`tools/mosu_g2p.py`](../tools/mosu_g2p.py) (`LEXICON`).
 
 **Verification.** `mosu_g2p.py --selftest` passes and `check_voice.py` accepts
-all 78 clips. A native listening check of `luni_compare.wav` on the watch is
-still pending; an ASR transcript is not a Romanian ear.
+all 78 clips. The wearer listened to `luni_compare.wav` on the watch and
+confirmed the restored doubled-palatal variant sounds right; the clips were
+pushed to the card and the voice gate passed again before release.
 
 ## Adding a finding
 

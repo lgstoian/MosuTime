@@ -170,6 +170,16 @@ five-fold improvement over the original ~5 hours.
 `/sdcard/power.log` records every minute of this run and is the source of these
 numbers.
 
+**Confirmation soak on the v1.1.4 candidate:** 100% → 40% in **22.04 h** with
+10 wakes, 4 screen-on minutes out of 1006 uncharged samples (0.4%), and
+1,989,660 light-sleep entries (≈1536/min). On the same 4 mAh-per-percent index
+that is ≈2.7%/h or ≈10.9 mA, an estimate, not a meter reading. The cell was
+recharged at the end of the run, so the log contains both a discharge and a
+charging window; `tools/check_power_log.py --allow-gaps` splits them and passes
+the discharge. This run did not reach empty, so the earlier 25.9 h full
+discharge remains the measured end-to-end runtime; the two runs are consistent
+in that neither shows the old ~110 mA floor.
+
 ## Quiet by default
 
 Production is silent unless something fails:
