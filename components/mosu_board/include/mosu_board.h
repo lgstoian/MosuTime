@@ -60,6 +60,9 @@ typedef struct {
     bool battery_present;
     bool vbus_present;
     bool charging;
+    /* The charger has finished (status 4).  The cell then relaxes by a few
+     * tens of mV, so voltage alone would report 97% right after a full charge. */
+    bool charge_done;
     uint16_t millivolts;
     uint8_t percent;
 } mosu_board_pmu_t;

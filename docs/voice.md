@@ -123,6 +123,12 @@ minute and a weekday follow. A statement contour is correct in both cases.
 `d_0` is Monday, not Sunday: `struct tm` counts from Sunday, and
 `mosu_weekday_from_tm()` converts it before the clip name is built.
 
+`d_3.wav` (*Joi.*) is special: the Piper lexicon rendered it as a different
+word, so this one clip is generated from the text by the native Romanian
+`facebook/mms-tts-ron` voice. Do **not** regenerate it with
+`gen_voice.py --force`, which would replace it with the wrong Piper render.
+The other 77 clips still come from `gen_voice.py` and `mosu_g2p.py`.
+
 ## Romanian grammar rules used
 
 | Rule | Example |
@@ -328,6 +334,9 @@ opens only the names it builds.
   `tools/piper-models/`, which is ignored by git, and are never committed.
 * The generated WAV files are not committed to this repository. They are
   produced locally by `tools/gen_voice.py`.
+* `d_3.wav` is rendered by `facebook/mms-tts-ron`, which is **CC-BY-NC-4.0**.
+  It is suitable for this personal, non-commercial watch; check that licence
+  before redistributing the clip commercially.
 * If you replace the voice with a recording of a real person, you need that
   person's permission before distributing the clips, and the recording keeps
   its own licence.

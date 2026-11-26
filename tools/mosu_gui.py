@@ -41,7 +41,7 @@ except ImportError:
 
 FROZEN = bool(getattr(sys, "frozen", False))
 APP_NAME = "MosuTime Manager"
-APP_VERSION = "1.1.4"
+APP_VERSION = "1.1.5"
 
 
 def find_repo(start):

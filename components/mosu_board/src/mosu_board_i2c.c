@@ -283,15 +283,23 @@ esp_err_t mosu_board_pmu_read(mosu_board_pmu_t *out)
 
     uint8_t charge = (uint8_t)(status2 & 0x07);
     out->charging = charge >= 1 && charge <= 3; /* precharge, CC, CV */
+    out->charge_done = charge == 4;             /* charge complete */
 
     if (out->battery_present) {
         /* 13 bit ADC value, 1 mV/LSB: 5 bits in the high byte, 8 in the low. */
         ESP_RETURN_ON_ERROR(reg_read(s_pmu, 0x34, raw, 2), TAG, "pmu vbat");
         out->millivolts = (uint16_t)(((raw[0] & 0x1F) << 8) | raw[1]);
         out->percent = mosu_battery_percent(out->millivolts);
+        /* The PMU has finished charging: that is the authority on "full".
+         * The cell settles from ~4180 mV to ~4140 mV afterwards, which the
+         * voltage curve alone reads as 97%. */
+        if (out->charge_done && out->vbus_present) {
+            out->percent = 100;
+        }
     } else {
         out->millivolts = 0;
         out->percent = 0;
+        out->charge_done = false;
     }
 
     return ESP_OK;

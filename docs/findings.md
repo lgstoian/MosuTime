@@ -55,6 +55,7 @@ changed to make the emulator work.
 | 36 | `sleep_entries = 0` in the log could mean "console opened", not "not sleeping" | yes: RTC no-init + log gate | done: counter survives reconnect; checker rejects a stuck counter |
 | 37 | `luni` sounded foreign with the dictionary single palatal | yes: espeak-trained token | done: wearer confirmed the doubled-palatal clip |
 | 38 | Clean CI build failed on the WiFi AMPDU RX window | yes: explicit default | done: fresh-defaults build and CI both green |
+| 39 | A full charge displayed 97% instead of 100% | yes: PMU charge-done state | done: `status` reads 100% on the watch |
 
 ## 1. SD mount blocking boot
 
@@ -1075,6 +1076,27 @@ unchanged because it was already built with 6.
 **Verification.** A build in a new `build-ci` directory with only
 `sdkconfig.defaults` completed all 2030 steps, and CI run 45595272235 passed all
 three jobs (host, static analysis, ESP-IDF build) including the LVGL patch step.
+
+## 39. A full charge displayed 97% instead of 100%
+
+**Symptom.** After the charger finished, the watch face and `status` showed
+97% even though the cell was full. While still in CV it had shown 100%.
+
+**Cause.** The AXP2101 moves to charge-done (status register `0x01` low bits
+= 4) and the cell relaxes from about 4180 mV to 4140 mV. The gauge used only
+the voltage curve, whose 100% point is 4160 mV.
+
+**Fix.** `mosu_board_pmu_t` now carries `charge_done`; while VBUS is present
+and the PMU reports charge-done, the gauge reports 100% instead of deriving
+it from the relaxed voltage.
+
+**Fix lives in.**
+[`components/mosu_board/include/mosu_board.h`](../components/mosu_board/include/mosu_board.h),
+[`components/mosu_board/src/mosu_board_i2c.c`](../components/mosu_board/src/mosu_board_i2c.c).
+
+**Verification.** Logged a full charge on the attached watch: 81% → 100% at
+4160 mV, settling at 4180 mV, then `status` after charge-done reported
+`4138 mV, 100%, charging 0, vbus 1`. The unplugged case is not yet measured.
 
 ## Adding a finding
 
